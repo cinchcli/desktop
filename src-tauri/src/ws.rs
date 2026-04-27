@@ -1,0 +1,783 @@
+use futures_util::{SinkExt, StreamExt};
+use log::{error, info, warn};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
+use tauri::{AppHandle, Manager};
+use tauri_specta::Event;
+use tokio::sync::Mutex;
+use tokio::time::{self, Duration};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+use crate::auth::AuthStateHandle;
+use crate::clipboard::backend::PollContent;
+use crate::clipboard::ClipboardService;
+use crate::protocol::{
+    WSMessage, ACTION_CLIP_DELETED, ACTION_KEY_EXCHANGE_REQUESTED, ACTION_NEW_CLIP, ACTION_PING,
+    ACTION_REVOKED, ACTION_SEND_CLIPBOARD, ACTION_TOKEN_ROTATED,
+};
+use crate::store::{db::Database, models::LocalClip};
+use crate::tray::{self, TrayState};
+
+pub struct WsStatus(pub std::sync::Arc<std::sync::Mutex<String>>);
+
+impl WsStatus {
+    pub fn new() -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(
+            "connecting".to_string(),
+        )))
+    }
+    pub fn set(&self, s: &str) {
+        *self.0.lock().unwrap() = s.to_string();
+    }
+    pub fn get(&self) -> String {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(300);
+
+type WsSink = futures_util::stream::SplitSink<
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    Message,
+>;
+
+pub fn spawn_ws_client(
+    app: &AppHandle,
+    ws_url: String,
+    db: Arc<Database>,
+    clipboard: Arc<ClipboardService>,
+    ws_status: Arc<WsStatus>,
+    auth_handle: AuthStateHandle,
+    relay_connected: Arc<AtomicBool>,
+) {
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut backoff = crate::auth::Backoff::new();
+        loop {
+            info!("connecting to relay: {}", redact_token(&ws_url));
+            ws_status.set("connecting");
+            crate::events::WsStatus("connecting".into())
+                .emit(&app_handle)
+                .ok();
+            tray::update_tray_status(&app_handle, "connecting");
+
+            match connect_and_listen(
+                &app_handle,
+                &ws_url,
+                &db,
+                &clipboard,
+                &ws_status,
+                &auth_handle,
+                &relay_connected,
+            )
+            .await
+            {
+                Ok(()) => {
+                    info!("connection closed cleanly");
+                    backoff.reset();
+                }
+                Err(e) => {
+                    error!("connection error: {}", e);
+                }
+            }
+
+            relay_connected.store(false, Ordering::Relaxed);
+            ws_status.set("disconnected");
+            crate::events::WsStatus("disconnected".into())
+                .emit(&app_handle)
+                .ok();
+            tray::update_tray_status(&app_handle, "disconnected");
+            let delay = backoff.next();
+            info!("reconnecting in {}ms...", delay.as_millis());
+            time::sleep(delay).await;
+        }
+    });
+}
+
+async fn connect_and_listen(
+    app: &AppHandle,
+    ws_url: &str,
+    db: &Arc<Database>,
+    clipboard: &Arc<ClipboardService>,
+    ws_status: &Arc<WsStatus>,
+    auth_handle: &AuthStateHandle,
+    relay_connected: &Arc<AtomicBool>,
+) -> Result<(), String> {
+    let connect_result = connect_async(ws_url).await;
+
+    let (ws_stream, _) = match connect_result {
+        Ok(result) => result,
+        Err(e) => {
+            // Check for 401 during WebSocket upgrade handshake
+            if let tokio_tungstenite::tungstenite::Error::Http(ref resp) = e {
+                if resp.status() == 401 {
+                    let body = String::from_utf8_lossy(resp.body().as_deref().unwrap_or(b""));
+                    let reason = if body.contains("device_revoked") {
+                        crate::auth::Ws401Reason::DeviceRevoked
+                    } else {
+                        crate::auth::Ws401Reason::InvalidToken
+                    };
+                    // Wipe creds on device_revoked (mirror ACTION_REVOKED path)
+                    if matches!(reason, crate::auth::Ws401Reason::DeviceRevoked) {
+                        if let Err(wipe_err) = crate::auth::wipe_credentials() {
+                            log::warn!("wipe_credentials on 401 device_revoked: {}", wipe_err);
+                        }
+                    }
+                    let current = auth_handle.lock().unwrap().clone();
+                    let next = crate::auth::classify_next_state(
+                        &current,
+                        &crate::auth::AuthEvent::Ws401 { reason },
+                    );
+                    crate::auth::transition(app, auth_handle, next);
+                }
+            }
+            return Err(format!("ws connect failed: {}", e));
+        }
+    };
+
+    info!("connected to relay");
+    relay_connected.store(true, Ordering::Relaxed);
+    ws_status.set("connected");
+    crate::events::WsStatus("connected".into()).emit(app).ok();
+    tray::update_tray_status(app, "connected");
+
+    // Flush offline queue on reconnect
+    flush_offline_queue(db).await;
+
+    let (write, mut read) = ws_stream.split();
+    let write = Arc::new(Mutex::new(write));
+
+    // Spawn heartbeat: send pong every 5 minutes
+    let write_hb = write.clone();
+    let heartbeat = tauri::async_runtime::spawn(async move {
+        let mut interval = time::interval(HEARTBEAT_INTERVAL);
+        loop {
+            interval.tick().await;
+            let pong = WSMessage::pong();
+            let json = serde_json::to_string(&pong).unwrap();
+            let mut w = write_hb.lock().await;
+            if w.send(Message::Text(json.into())).await.is_err() {
+                break;
+            }
+            info!("heartbeat pong sent");
+        }
+    });
+
+    // Read loop
+    while let Some(msg_result) = read.next().await {
+        let msg = msg_result.map_err(|e| format!("ws read error: {}", e))?;
+
+        match msg {
+            Message::Text(text) => {
+                handle_text_message(app, &write, &text, db, clipboard, auth_handle).await;
+            }
+            Message::Ping(data) => {
+                let mut w = write.lock().await;
+                w.send(Message::Pong(data)).await.ok();
+            }
+            Message::Close(_) => {
+                info!("relay closed connection");
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    heartbeat.abort();
+    Ok(())
+}
+
+async fn handle_text_message(
+    app: &AppHandle,
+    write: &Arc<Mutex<WsSink>>,
+    text: &str,
+    db: &Arc<Database>,
+    clipboard: &Arc<ClipboardService>,
+    auth_handle: &AuthStateHandle,
+) {
+    let msg: WSMessage = match serde_json::from_str(text) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!("failed to parse ws message: {}", e);
+            return;
+        }
+    };
+
+    match msg.action.as_str() {
+        ACTION_NEW_CLIP => {
+            if let Some(mut clip) = msg.clip {
+                // Phase 4.5: decrypt encrypted clips BEFORE any processing
+                if clip.encrypted {
+                    match crate::auth::credential::read_encryption_key(&clip.user_id) {
+                        Ok(key_bytes) => {
+                            if let Ok(key) = <[u8; 32]>::try_from(key_bytes.as_slice()) {
+                                match crate::crypto::decrypt(&key, &clip.content) {
+                                    Ok(plaintext) => {
+                                        // Replace ciphertext with plaintext for all downstream processing.
+                                        // For binary clips (images), encode as base64 to avoid lossy UTF-8
+                                        // corruption of raw binary bytes.
+                                        let is_binary = clip.media_path.is_some()
+                                            || clip.content_type.as_str().starts_with("image");
+                                        if is_binary {
+                                            use base64::Engine;
+                                            clip.content =
+                                                base64::engine::general_purpose::STANDARD
+                                                    .encode(&plaintext);
+                                        } else {
+                                            clip.content = String::from_utf8(plaintext)
+                                                .unwrap_or_else(|e| {
+                                                    String::from_utf8_lossy(e.as_bytes())
+                                                        .to_string()
+                                                });
+                                        }
+                                        // Mark as decrypted — local DB always stores plaintext
+                                        clip.encrypted = false;
+                                    }
+                                    Err(e) => {
+                                        error!("clip decryption failed: {}", e);
+                                        // Insert as-is (encrypted) — clip not lost, but content unreadable
+                                    }
+                                }
+                            } else {
+                                error!("encryption key is not 32 bytes, skipping decryption");
+                            }
+                        }
+                        Err(e) => {
+                            warn!("no encryption key available for decryption: {}", e);
+                            // Insert as-is — encrypted content visible in UI as base64 garble
+                        }
+                    }
+                }
+
+                info!(
+                    "received clip: {} from {} ({} bytes)",
+                    clip.id, clip.source, clip.byte_size
+                );
+
+                // Check if this is a never-before-seen source
+                let is_new_source = db.is_source_new(&clip.source).unwrap_or(false);
+
+                // Decide whether to auto-copy to clipboard
+                let should_auto_copy = if is_new_source {
+                    // Default to true for new sources; user can disable later
+                    db.set_source_auto_copy(&clip.source, true).ok();
+                    true
+                } else {
+                    db.is_source_auto_copy(&clip.source).unwrap_or(false)
+                };
+
+                if should_auto_copy {
+                    let is_image = clip.media_path.is_some()
+                        && clip.media_path.as_ref().is_some_and(|p| !p.is_empty());
+
+                    if is_image {
+                        // Image clip: spawn async task to fetch and auto-copy
+                        let app_clone = app.clone();
+                        let db_clone = db.clone();
+                        let clip_clone = clip.clone();
+                        let clipboard_clone = clipboard.clone();
+                        let pre_token = clipboard.token();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) = handle_image_auto_copy(
+                                &app_clone,
+                                &db_clone,
+                                &clip_clone,
+                                &clipboard_clone,
+                                pre_token,
+                            )
+                            .await
+                            {
+                                error!("image auto-copy failed: {}", e);
+                                crate::events::ImageDownloadFailed(clip_clone.id.clone())
+                                    .emit(&app_clone)
+                                    .ok();
+                            }
+                        });
+                    } else {
+                        // Text clip: synchronous auto-copy
+                        if let Err(e) = clipboard.write_text(&clip.content) {
+                            error!("write_text failed: {}", e);
+                        }
+                    }
+                }
+
+                // Persist to local DB
+                let local_clip = LocalClip::from_proto(&clip);
+                if let Err(e) = db.insert_clip(&local_clip) {
+                    error!("db insert failed: {}", e);
+                }
+
+                // Update tray state + show notification
+                if let Some(state) = app.try_state::<StdMutex<TrayState>>() {
+                    let mut state = state.lock().unwrap();
+                    tray::update_tray_clip(app, &clip);
+
+                    if is_new_source {
+                        // Always notify for a new source
+                        tray::show_notification(app, &clip);
+                    } else if !should_auto_copy {
+                        // Source has auto-copy OFF — always notify so user can act
+                        tray::show_notification(app, &clip);
+                    } else if state.should_notify(&clip.source) {
+                        // Auto-copy ON — use normal throttle
+                        tray::show_notification(app, &clip);
+                    }
+
+                    state.add_clip(clip.clone());
+                }
+
+                // Emit new source event so frontend can show prompt
+                if is_new_source {
+                    crate::events::NewSourceDetected(clip.source.clone())
+                        .emit(app)
+                        .ok();
+                }
+
+                // Emit to frontend (send the local clip with detected type)
+                crate::events::ClipReceived(local_clip).emit(app).ok();
+            }
+        }
+        ACTION_SEND_CLIPBOARD => {
+            if let Some(pull_id) = msg.pull_id {
+                info!("pull request: {}", pull_id);
+
+                let response = match clipboard.poll_snapshot() {
+                    Ok(snap) => match snap.content {
+                        PollContent::Text(text) => WSMessage::clipboard_content(pull_id, text),
+                        PollContent::ImagePng(_) => WSMessage::clipboard_error(
+                            pull_id,
+                            "clipboard contains image (text pull only)".into(),
+                        ),
+                        PollContent::Empty | PollContent::Unsupported => {
+                            WSMessage::clipboard_content(pull_id, String::new())
+                        }
+                    },
+                    Err(e) => WSMessage::clipboard_error(pull_id, e.to_string()),
+                };
+
+                let json = serde_json::to_string(&response).unwrap();
+                let mut w = write.lock().await;
+                if let Err(e) = w.send(Message::Text(json.into())).await {
+                    error!("failed to send clipboard response: {}", e);
+                }
+            }
+        }
+        ACTION_PING => {
+            let pong = WSMessage::pong();
+            let json = serde_json::to_string(&pong).unwrap();
+            let mut w = write.lock().await;
+            w.send(Message::Text(json.into())).await.ok();
+        }
+        ACTION_CLIP_DELETED => {
+            if let Some(clip) = &msg.clip {
+                info!("clip deleted: {}", clip.id);
+                if let Err(e) = db.delete_clip(&clip.id) {
+                    error!("db delete failed: {}", e);
+                }
+                crate::events::ClipDeleted(clip.id.clone()).emit(app).ok();
+            }
+        }
+        ACTION_REVOKED => {
+            info!("WS: device revoked (reason={:?})", msg.reason);
+            // Wipe local credentials best-effort.
+            if let Err(e) = crate::auth::wipe_credentials() {
+                log::warn!("wipe_credentials on revoke: {}", e);
+            }
+            // Transition via classifier — same as 401 device_revoked.
+            let current = auth_handle.lock().unwrap().clone();
+            let next = crate::auth::classify_next_state(
+                &current,
+                &crate::auth::AuthEvent::Ws401 {
+                    reason: crate::auth::Ws401Reason::DeviceRevoked,
+                },
+            );
+            crate::auth::transition(app, auth_handle, next);
+        }
+        ACTION_TOKEN_ROTATED => {
+            let (Some(token), Some(device_id)) = (msg.token.as_deref(), msg.device_id.as_deref())
+            else {
+                log::warn!("WS token_rotated: missing token or device_id in payload");
+                return;
+            };
+            let hostname = msg.hostname.as_deref().unwrap_or("unknown").to_string();
+
+            // Brief transition through Authenticating{RotatingToken}.
+            let current = auth_handle.lock().unwrap().clone();
+            let next =
+                crate::auth::classify_next_state(&current, &crate::auth::AuthEvent::WsTokenRotated);
+            crate::auth::transition(app, auth_handle, next);
+
+            // Persist new token.
+            let user_id = extract_user_id(&current);
+            match crate::auth::rotate_credentials(&user_id, device_id, token, &hostname) {
+                Ok(backend) => {
+                    log::info!("token_rotated persisted via {}", backend);
+                    // Re-read cfg for relay_url and emit Authenticated.
+                    if let Ok(cfg) = crate::protocol::Config::load() {
+                        crate::auth::transition(
+                            app,
+                            auth_handle,
+                            crate::auth::AuthState::Authenticated {
+                                user_id: cfg.user_id,
+                                device_id: cfg.active_device_id,
+                                hostname: cfg.hostname,
+                                relay_url: cfg.relay_url,
+                            },
+                        );
+                    }
+                }
+                Err(e) => {
+                    log::error!("token_rotated rotate_credentials failed: {}", e);
+                    crate::auth::transition(
+                        app,
+                        auth_handle,
+                        crate::auth::AuthState::ErrorRecoverable {
+                            reason: crate::auth::AuthErrorReason::KeyringUnavailable,
+                            retry_after_ms: Some(2_000),
+                        },
+                    );
+                }
+            }
+        }
+        ACTION_KEY_EXCHANGE_REQUESTED => {
+            let device_id = match msg.device_id.as_deref() {
+                Some(id) => id.to_string(),
+                None => {
+                    warn!("key_exchange_requested: missing device_id");
+                    return;
+                }
+            };
+            info!("key exchange requested for device {}", device_id);
+
+            // Load our encryption key
+            let cfg = match crate::auth::credential::load_config() {
+                Ok(c) => c,
+                Err(e) => {
+                    error!("cannot load config for key exchange: {}", e);
+                    return;
+                }
+            };
+            let user_key = match crate::auth::credential::read_encryption_key(&cfg.user_id) {
+                Ok(k) => k,
+                Err(e) => {
+                    error!("no encryption key for key exchange: {}", e);
+                    return;
+                }
+            };
+
+            // Fetch the new device's public key from relay
+            let relay_url = cfg.relay_url.clone();
+            let token = match crate::auth::credential::read_credentials(&cfg) {
+                Ok(t) => t,
+                Err(e) => {
+                    error!("no auth token for key exchange: {}", e);
+                    return;
+                }
+            };
+            let dev_id = device_id.clone();
+            // Capture the WS-message fingerprint for later verification inside the async block.
+            let ws_fp = msg.device_key_fingerprint.clone().unwrap_or_default();
+
+            tauri::async_runtime::spawn(async move {
+                // GET /devices to find the device's public key
+                let client = reqwest::Client::new();
+                let resp = client
+                    .get(format!("{}/devices", relay_url))
+                    .header("Authorization", format!("Bearer {}", token))
+                    .send()
+                    .await;
+
+                let devices: Vec<serde_json::Value> = match resp {
+                    Ok(r) if r.status().is_success() => r.json().await.unwrap_or_default(),
+                    _ => {
+                        error!("failed to fetch devices for key exchange");
+                        return;
+                    }
+                };
+
+                // Find the target device's public key
+                let device_pub_key = devices
+                    .iter()
+                    .find(|d| d.get("id").and_then(|v| v.as_str()) == Some(&dev_id))
+                    .and_then(|d| d.get("public_key"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let device_pub = match device_pub_key {
+                    Some(pk) if !pk.is_empty() => pk,
+                    _ => {
+                        error!("device {} has no public key", dev_id);
+                        return;
+                    }
+                };
+
+                // Verify fingerprint: compute SHA-256 of the fetched public key bytes and
+                // compare against the fingerprint delivered in the WS message.
+                // If the relay or a MitM substituted a different public key the hashes will
+                // not match and we abort the key exchange to protect the user encryption key.
+                if !ws_fp.is_empty() {
+                    use base64::Engine;
+                    use sha2::Digest;
+                    match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&device_pub) {
+                        Ok(raw_pub) => {
+                            let digest = sha2::Sha256::digest(&raw_pub);
+                            let fetched_fp = digest[..8]
+                                .iter()
+                                .map(|b| format!("{:02x}", b))
+                                .collect::<String>();
+                            if fetched_fp != ws_fp {
+                                error!(
+                                    "key_exchange_requested: fingerprint mismatch \
+                                     (ws={} fetched={}) — aborting key exchange",
+                                    ws_fp, fetched_fp
+                                );
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            error!(
+                                "key_exchange_requested: cannot decode public key for \
+                                 fingerprint check: {} — aborting",
+                                e
+                            );
+                            return;
+                        }
+                    }
+                }
+
+                // Generate ephemeral keypair for ECDH
+                let (eph_priv_b64, eph_pub_b64) = crate::crypto::generate_ephemeral_keypair();
+
+                // Derive shared key via ECDH
+                let aes_key = match crate::crypto::derive_shared_key(&eph_priv_b64, &device_pub) {
+                    Ok(k) => k,
+                    Err(e) => {
+                        error!("ECDH failed: {}", e);
+                        return;
+                    }
+                };
+
+                // Encrypt user_key with derived AES key
+                let encrypted_bundle = match crate::crypto::encrypt(&aes_key, &user_key) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        error!("encrypt user_key failed: {}", e);
+                        return;
+                    }
+                };
+
+                // POST /auth/key-bundle to relay
+                let bundle_body = serde_json::json!({
+                    "device_id": dev_id,
+                    "ephemeral_public_key": eph_pub_b64,
+                    "encrypted_bundle": encrypted_bundle,
+                });
+
+                match client
+                    .post(format!("{}/auth/key-bundle", relay_url))
+                    .header("Authorization", format!("Bearer {}", token))
+                    .json(&bundle_body)
+                    .send()
+                    .await
+                {
+                    Ok(r) if r.status().is_success() => {
+                        info!("key bundle posted for device {}", dev_id);
+                    }
+                    Ok(r) => {
+                        error!("key bundle POST failed: HTTP {}", r.status());
+                    }
+                    Err(e) => {
+                        error!("key bundle POST failed: {}", e);
+                    }
+                }
+            });
+        }
+        other => {
+            warn!("unknown action: {}", other);
+        }
+    }
+}
+
+fn extract_user_id(state: &crate::auth::AuthState) -> String {
+    match state {
+        crate::auth::AuthState::Authenticated { user_id, .. } => user_id.clone(),
+        _ => {
+            // Fall back to config.json for the pre-authenticated case (lazy migration on first WS).
+            crate::protocol::Config::load()
+                .ok()
+                .map(|c| c.user_id)
+                .unwrap_or_default()
+        }
+    }
+}
+
+async fn handle_image_auto_copy(
+    app: &AppHandle,
+    _db: &Arc<Database>,
+    clip: &crate::protocol::Clip,
+    clipboard: &Arc<ClipboardService>,
+    pre_token: Option<u64>,
+) -> Result<(), String> {
+    let media_path = clip
+        .media_path
+        .as_ref()
+        .ok_or_else(|| "no media_path".to_string())?;
+
+    // Fetch image from relay
+    let config = match crate::protocol::Config::load() {
+        Ok(c) => c,
+        Err(e) => return Err(format!("config load failed: {}", e)),
+    };
+
+    let url = format!("{}/clips/{}/media", config.relay_url, clip.id);
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", config.token))
+        .send()
+        .await
+        .map_err(|e| format!("media fetch failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("media fetch returned {}", resp.status()));
+    }
+
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("reading media body: {}", e))?;
+
+    // Save to local media cache
+    let media_dir = dirs::data_dir()
+        .unwrap_or_else(|| dirs::home_dir().unwrap().join(".local/share"))
+        .join("com.cinch.app");
+    let full_path = media_dir.join(media_path);
+    if let Some(parent) = full_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    std::fs::write(&full_path, &bytes).map_err(|e| format!("saving media file: {}", e))?;
+
+    // Pre-write change check: if clipboard changed during download, skip
+    if clipboard.has_changed_since(pre_token) {
+        info!("clipboard changed during image download, skipping auto-copy");
+        crate::events::ImageDownloadComplete(clip.id.clone())
+            .emit(app)
+            .ok();
+        return Ok(());
+    }
+
+    // Write image to clipboard
+    if let Err(e) = clipboard.write_image_from_png_file(&full_path) {
+        return Err(format!("write_image failed: {}", e));
+    }
+
+    crate::events::ImageDownloadComplete(clip.id.clone())
+        .emit(app)
+        .ok();
+    info!("image auto-copied to clipboard: {} bytes", bytes.len());
+    Ok(())
+}
+
+async fn flush_offline_queue(db: &Database) {
+    let unsynced = match db.list_unsynced_clips() {
+        Ok(clips) => clips,
+        Err(e) => {
+            warn!("offline flush: failed to list unsynced: {}", e);
+            return;
+        }
+    };
+
+    if unsynced.is_empty() {
+        return;
+    }
+
+    info!("offline flush: {} clips to sync", unsynced.len());
+
+    let config = match crate::protocol::Config::load() {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("offline flush: config load failed: {}", e);
+            return;
+        }
+    };
+
+    let relay_url = &config.relay_url;
+    let token = &config.token;
+
+    // Load encryption key once before the loop — used to encrypt each queued clip.
+    let enc_key: Option<[u8; 32]> = crate::auth::credential::read_encryption_key(&config.user_id)
+        .ok()
+        .and_then(|k| <[u8; 32]>::try_from(k.as_slice()).ok());
+
+    let client = reqwest::Client::new();
+    for clip in &unsynced {
+        let push_url = format!("{}/clips", relay_url);
+
+        // Encrypt content if a key is available; otherwise send plaintext.
+        let (content, encrypted) = if let Some(ref key) = enc_key {
+            match crate::crypto::encrypt(key, clip.content.as_bytes()) {
+                Ok(ciphertext) => (ciphertext, true),
+                Err(e) => {
+                    warn!("offline flush: encrypt failed for {}: {}", clip.id, e);
+                    (clip.content.clone(), false)
+                }
+            }
+        } else {
+            (clip.content.clone(), false)
+        };
+
+        let body = serde_json::json!({
+            "content": content,
+            "content_type": clip.content_type,
+            "source": clip.source,
+            "label": clip.label,
+            "encrypted": encrypted,
+        });
+
+        match client
+            .post(&push_url)
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                if let Err(e) = db.mark_synced(&clip.id) {
+                    warn!("offline flush: mark_synced failed for {}: {}", clip.id, e);
+                }
+            }
+            Ok(resp) => {
+                warn!(
+                    "offline flush: relay returned {} for clip {}",
+                    resp.status(),
+                    clip.id
+                );
+                break; // stop on first failure, retry on next reconnect
+            }
+            Err(e) => {
+                warn!("offline flush: request failed for {}: {}", clip.id, e);
+                break; // stop on first failure
+            }
+        }
+    }
+}
+
+fn redact_token(url: &str) -> String {
+    if let Some(idx) = url.find("token=") {
+        let prefix = &url[..idx + 6];
+        format!("{}***", prefix)
+    } else {
+        url.to_string()
+    }
+}
+
+/// Testable pure function: classify a WS 401 body string into a Ws401Reason.
+/// Used by the connect_and_listen error handler.
+#[cfg(test)]
+pub fn dispatch_ws_401_for_test(body: &str) -> crate::auth::Ws401Reason {
+    if body.contains("device_revoked") {
+        crate::auth::Ws401Reason::DeviceRevoked
+    } else {
+        crate::auth::Ws401Reason::InvalidToken
+    }
+}
