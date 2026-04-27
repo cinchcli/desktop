@@ -1,0 +1,15 @@
+pre-commit:
+  parallel: true
+  commands:
+    cargo-fmt:
+      run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+    typecheck:
+      run: npx tsc --noEmit
+
+pre-push:
+  parallel: false
+  commands:
+    cargo-check:
+      run: cargo check --manifest-path src-tauri/Cargo.toml
+    test:
+      run: npm test
