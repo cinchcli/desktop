@@ -104,3 +104,38 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+  update-cask:
+    needs: build-tauri
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tap
+        uses: actions/checkout@v4
+        with:
+          repository: cinchcli/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Checkout desktop (for script)
+        uses: actions/checkout@v4
+        with:
+          path: desktop
+
+      - name: Extract version from tag
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#desktop-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for release assets
+        run: sleep 30
+
+      - name: Update cask
+        run: bash desktop/scripts/update-cask.sh "${{ steps.ver.outputs.version }}" "$PWD/tap"
+
+      - name: Commit and push
+        working-directory: tap
+        run: |
+          git config user.name  "cinchcli Bot"
+          git config user.email "hi@cinchcli.com"
+          git add Casks/cinch-desktop.rb
+          git commit -m "chore: bump cinch-desktop to ${{ steps.ver.outputs.version }}"
+          git push
