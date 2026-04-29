@@ -90,7 +90,10 @@ pub async fn pair_with_token(
             .decode(&pub_b64)
             .map_err(|e| format!("decode pub key: {}", e))?;
         let digest = Sha256::digest(&raw);
-        hex::encode(&digest[..8])
+        digest[..8]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
     };
 
     let body = serde_json::json!({

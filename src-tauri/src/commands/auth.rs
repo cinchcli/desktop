@@ -6,8 +6,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
 
 use crate::auth::{
-    add_relay_profile, classify_next_state, load_multi_config, transition, wipe_credentials,
-    AuthEvent, AuthState, AuthStateHandle,
+    add_relay_profile, load_multi_config, transition, wipe_credentials, AuthState, AuthStateHandle,
 };
 use crate::commands::relays::PendingRelayAdd;
 use crate::protocol::MultiConfigHandle;
@@ -35,76 +34,26 @@ pub fn get_auth_state(handle: State<'_, AuthStateHandle>) -> AuthState {
 /// secondary path (legacy self-host servers that skip the device-code completion step).
 #[tauri::command]
 #[specta::specta]
-pub async fn sign_in(
+pub fn sign_in(
     app: AppHandle,
     handle: State<'_, AuthStateHandle>,
     relay_url: String,
     provider: Option<String>,
 ) -> Result<(), String> {
-    transition(
-        &app,
-        &handle,
-        classify_next_state(&handle.lock().unwrap().clone(), &AuthEvent::ClickSignIn),
-    );
-
+    let auth_handle = handle.inner().clone();
     let relay = relay_url.trim().trim_end_matches('/').to_string();
     if relay.is_empty() {
-        transition(&app, &handle, AuthState::LocalOnly);
         return Err("relay_url required".into());
     }
 
-    // Step 1: Issue a device code so the browser auth page can complete the flow.
     let hostname = std::env::var("HOSTNAME")
         .or_else(|_| std::env::var("COMPUTERNAME"))
         .unwrap_or_else(|_| "unknown".to_string());
-
-    let client = reqwest::Client::new();
-    let dc_resp = client
-        .post(format!("{}/auth/device-code", relay))
-        .json(&serde_json::json!({"hostname": hostname}))
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await
-        .map_err(|e| format!("device-code request failed: {}", e))?;
-
-    if !dc_resp.status().is_success() {
-        transition(&app, &handle, AuthState::LocalOnly);
-        return Err(format!(
-            "device-code request failed: HTTP {}",
-            dc_resp.status()
-        ));
-    }
-
-    let dc: serde_json::Value = dc_resp
-        .json()
-        .await
-        .map_err(|e| format!("device-code parse failed: {}", e))?;
-
-    let device_code = dc["device_code"]
-        .as_str()
-        .ok_or("missing device_code in response")?
-        .to_string();
-    let user_code = dc["user_code"].as_str().unwrap_or("").to_string();
-    let verification_uri = dc["verification_uri"]
-        .as_str()
-        .ok_or("missing verification_uri in response")?
-        .to_string();
-
-    // Step 2: Open the browser — directly at the provider's OAuth start URL if
-    // a provider was specified, otherwise at the relay's provider-selection page.
-    let browser_url = if let Some(p) = &provider {
-        format!("{}/auth/oauth/{}/start?device_code={}", relay, p, user_code)
-    } else {
-        verification_uri
-    };
-    tauri_plugin_opener::open_url(&browser_url, None::<&str>)
-        .map_err(|e| format!("failed to open browser: {}", e))?;
-
-    // Step 3: Spawn a background task that polls until the user completes OAuth.
     let app2 = app.clone();
-    let handle2 = handle.inner().clone();
-    let relay2 = relay.clone();
-    let poll_url = format!("{}/auth/device-code/poll?code={}", relay, device_code);
+    let handle2 = auth_handle.clone();
+    let relay2 = relay;
+    let provider2 = provider;
+    let hostname2 = hostname.clone();
     let mc: MultiConfigHandle = app.state::<MultiConfigHandle>().inner().clone();
     let db = app
         .state::<Arc<crate::store::db::Database>>()
@@ -122,7 +71,77 @@ pub async fn sign_in(
     let ws_abort = app.state::<Arc<WsAbortHandle>>().inner().clone();
 
     tauri::async_runtime::spawn(async move {
+        // Step 1: Issue a device code so the browser auth page can complete the flow.
         let client = reqwest::Client::new();
+        let dc_resp = match client
+            .post(format!("{}/auth/device-code", relay2))
+            .json(&serde_json::json!({"hostname": hostname2}))
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+        {
+            Ok(resp) => resp,
+            Err(e) => {
+                log::error!("sign_in: device-code request failed: {}", e);
+                transition(&app2, &handle2, AuthState::LocalOnly);
+                return;
+            }
+        };
+
+        if !dc_resp.status().is_success() {
+            log::error!(
+                "sign_in: device-code request failed with HTTP {}",
+                dc_resp.status()
+            );
+            transition(&app2, &handle2, AuthState::LocalOnly);
+            return;
+        }
+
+        let dc: serde_json::Value = match dc_resp.json().await {
+            Ok(dc) => dc,
+            Err(e) => {
+                log::error!("sign_in: device-code parse failed: {}", e);
+                transition(&app2, &handle2, AuthState::LocalOnly);
+                return;
+            }
+        };
+
+        let device_code = match dc["device_code"].as_str() {
+            Some(code) if !code.is_empty() => code.to_string(),
+            _ => {
+                log::error!("sign_in: missing device_code in response");
+                transition(&app2, &handle2, AuthState::LocalOnly);
+                return;
+            }
+        };
+        let user_code = dc["user_code"].as_str().unwrap_or("").to_string();
+        let verification_uri = match dc["verification_uri"].as_str() {
+            Some(uri) if !uri.is_empty() => uri.to_string(),
+            _ => {
+                log::error!("sign_in: missing verification_uri in response");
+                transition(&app2, &handle2, AuthState::LocalOnly);
+                return;
+            }
+        };
+
+        // Step 2: Open the browser — directly at the provider's OAuth start URL if
+        // a provider was specified, otherwise at the relay's provider-selection page.
+        let browser_url = if let Some(p) = &provider2 {
+            format!(
+                "{}/auth/oauth/{}/start?device_code={}",
+                relay2, p, user_code
+            )
+        } else {
+            verification_uri
+        };
+        if let Err(e) = tauri_plugin_opener::open_url(&browser_url, None::<&str>) {
+            log::error!("sign_in: failed to open browser: {}", e);
+            transition(&app2, &handle2, AuthState::LocalOnly);
+            return;
+        }
+
+        // Step 3: Poll until the user completes OAuth.
+        let poll_url = format!("{}/auth/device-code/poll?code={}", relay2, device_code);
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5 * 60);
 
         loop {
@@ -177,7 +196,7 @@ pub async fn sign_in(
 
             // Write credentials to disk / keychain.
             if let Err(e) =
-                crate::auth::write_credentials(&user_id, &device_id, &token, &relay2, &hostname)
+                crate::auth::write_credentials(&user_id, &device_id, &token, &relay2, &hostname2)
             {
                 log::error!("sign_in: credential write failed: {}", e);
                 transition(&app2, &handle2, AuthState::LocalOnly);
@@ -203,7 +222,7 @@ pub async fn sign_in(
                 AuthState::Authenticated {
                     user_id: user_id.clone(),
                     device_id: device_id.clone(),
-                    hostname: hostname.clone(),
+                    hostname: hostname2.clone(),
                     relay_url: relay2.clone(),
                     active_relay_id: active_relay_id.clone(),
                 },
