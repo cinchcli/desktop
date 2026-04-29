@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { commands } from "../bindings";
-import { unwrap } from "../lib/tauri";
 import { C } from "../design";
 import { IconX } from "../icons";
+import { AddRelayDialog } from "./AddRelayDialog";
 
 interface UpgradePromptProps {
   onDismiss: () => void;
@@ -10,16 +9,12 @@ interface UpgradePromptProps {
 
 export function UpgradePrompt({ onDismiss }: UpgradePromptProps) {
   const [hover, setHover] = useState(false);
+  const [addRelayOpen, setAddRelayOpen] = useState(false);
 
-  const handleSignIn = async () => {
-    try {
-      await unwrap(commands.signIn("https://api.cinchcli.com"));
-    } catch (e) {
-      console.error("sign_in failed:", e);
-    }
-  };
+  const handleSignIn = () => setAddRelayOpen(true);
 
   return (
+    <>
     <div
       style={{
         width: "100%",
@@ -86,5 +81,9 @@ export function UpgradePrompt({ onDismiss }: UpgradePromptProps) {
         <IconX size={12} />
       </button>
     </div>
+    {addRelayOpen && (
+      <AddRelayDialog onClose={() => setAddRelayOpen(false)} />
+    )}
+    </>
   );
 }
