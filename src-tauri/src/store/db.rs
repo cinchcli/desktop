@@ -141,6 +141,24 @@ impl Database {
                 .map_err(|e| format!("migration synced failed: {}", e))?;
         }
 
+        // Pin feature: add is_pinned and pin_note columns
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(clips)")
+            .map_err(|e| format!("pragma pin check failed: {}", e))?
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|e| format!("pragma pin query failed: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        if !cols.iter().any(|c| c == "is_pinned") {
+            conn.execute_batch("ALTER TABLE clips ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0")
+                .map_err(|e| format!("migration is_pinned failed: {}", e))?;
+        }
+        if !cols.iter().any(|c| c == "pin_note") {
+            conn.execute_batch("ALTER TABLE clips ADD COLUMN pin_note TEXT DEFAULT NULL")
+                .map_err(|e| format!("migration pin_note failed: {}", e))?;
+        }
+
         info!("database migration complete");
         Ok(())
     }
@@ -148,8 +166,8 @@ impl Database {
     pub fn insert_clip(&self, clip: &LocalClip) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR REPLACE INTO clips (id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT OR REPLACE INTO clips (id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced, is_pinned, pin_note)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 clip.id,
                 clip.user_id,
@@ -162,6 +180,8 @@ impl Database {
                 clip.created_at,
                 clip.ttl,
                 clip.synced,
+                clip.is_pinned as i32,
+                clip.pin_note,
             ],
         )
         .map_err(|e| format!("insert failed: {}", e))?;
@@ -177,7 +197,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
 
         let mut sql = String::from(
-            "SELECT id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced
+            "SELECT id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced, is_pinned, pin_note
              FROM clips WHERE 1=1",
         );
         let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -215,6 +235,8 @@ impl Database {
                     created_at: row.get(8)?,
                     ttl: row.get(9)?,
                     synced: row.get::<_, bool>(10).unwrap_or(true),
+                    is_pinned: row.get::<_, i32>(11).unwrap_or(0) != 0,
+                    pin_note: row.get(12)?,
                 })
             })
             .map_err(|e| format!("query failed: {}", e))?
@@ -224,25 +246,17 @@ impl Database {
         Ok(clips)
     }
 
-    pub fn search_clips(&self, query: &str, limit: i64) -> Result<Vec<LocalClip>, String> {
-        if query.trim().is_empty() {
-            return self.list_clips(None, None, limit);
-        }
-
+    pub fn list_pinned_clips(&self) -> Result<Vec<LocalClip>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT c.id, c.user_id, c.content, c.content_type, c.source, c.label, c.byte_size, c.media_path, c.created_at, c.ttl, c.synced
-                 FROM clips c
-                 JOIN clips_fts f ON c.rowid = f.rowid
-                 WHERE clips_fts MATCH ?1
-                 ORDER BY c.created_at DESC
-                 LIMIT ?2",
+                "SELECT id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced, is_pinned, pin_note
+                 FROM clips WHERE is_pinned = 1 ORDER BY created_at DESC",
             )
             .map_err(|e| format!("prepare failed: {}", e))?;
 
         let clips = stmt
-            .query_map(params![query, limit], |row| {
+            .query_map([], |row| {
                 Ok(LocalClip {
                     id: row.get(0)?,
                     user_id: row.get(1)?,
@@ -255,6 +269,75 @@ impl Database {
                     created_at: row.get(8)?,
                     ttl: row.get(9)?,
                     synced: row.get::<_, bool>(10).unwrap_or(true),
+                    is_pinned: true,
+                    pin_note: row.get(12)?,
+                })
+            })
+            .map_err(|e| format!("query failed: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(clips)
+    }
+
+    pub fn pin_clip(&self, id: &str, note: Option<&str>) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE clips SET is_pinned = 1, pin_note = ?2 WHERE id = ?1",
+            params![id, note],
+        )
+        .map_err(|e| format!("pin_clip failed: {}", e))?;
+        Ok(())
+    }
+
+    pub fn unpin_clip(&self, id: &str) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE clips SET is_pinned = 0, pin_note = NULL WHERE id = ?1",
+            params![id],
+        )
+        .map_err(|e| format!("unpin_clip failed: {}", e))?;
+        Ok(())
+    }
+
+    pub fn search_clips(&self, query: &str, limit: i64) -> Result<Vec<LocalClip>, String> {
+        if query.trim().is_empty() {
+            return self.list_clips(None, None, limit);
+        }
+
+        let conn = self.conn.lock().unwrap();
+        let like_pattern = format!("%{}%", query);
+        let mut stmt = conn
+            .prepare(
+                "SELECT c.id, c.user_id, c.content, c.content_type, c.source, c.label, c.byte_size, c.media_path, c.created_at, c.ttl, c.synced, c.is_pinned, c.pin_note
+                 FROM clips c
+                 JOIN clips_fts f ON c.rowid = f.rowid
+                 WHERE clips_fts MATCH ?1
+                 UNION
+                 SELECT c.id, c.user_id, c.content, c.content_type, c.source, c.label, c.byte_size, c.media_path, c.created_at, c.ttl, c.synced, c.is_pinned, c.pin_note
+                 FROM clips c
+                 WHERE c.is_pinned = 1 AND c.pin_note LIKE ?2
+                 ORDER BY created_at DESC
+                 LIMIT ?3",
+            )
+            .map_err(|e| format!("prepare failed: {}", e))?;
+
+        let clips = stmt
+            .query_map(params![query, like_pattern, limit], |row| {
+                Ok(LocalClip {
+                    id: row.get(0)?,
+                    user_id: row.get(1)?,
+                    content: row.get(2)?,
+                    content_type: row.get(3)?,
+                    source: row.get(4)?,
+                    label: row.get(5)?,
+                    byte_size: row.get(6)?,
+                    media_path: row.get(7)?,
+                    created_at: row.get(8)?,
+                    ttl: row.get(9)?,
+                    synced: row.get::<_, bool>(10).unwrap_or(true),
+                    is_pinned: row.get::<_, i32>(11).unwrap_or(0) != 0,
+                    pin_note: row.get(12)?,
                 })
             })
             .map_err(|e| format!("search failed: {}", e))?
@@ -323,7 +406,7 @@ impl Database {
 
         // First, find media paths of clips about to be deleted
         let mut stmt = conn
-            .prepare("SELECT media_path FROM clips WHERE ttl > 0 AND (created_at + ttl) < ?1 AND media_path IS NOT NULL AND media_path != ''")
+            .prepare("SELECT media_path FROM clips WHERE ttl > 0 AND (created_at + ttl) < ?1 AND is_pinned = 0 AND media_path IS NOT NULL AND media_path != ''")
             .map_err(|e| format!("prepare failed: {}", e))?;
         let media_paths: Vec<String> = stmt
             .query_map(params![now], |row| row.get(0))
@@ -333,7 +416,7 @@ impl Database {
 
         let deleted = conn
             .execute(
-                "DELETE FROM clips WHERE ttl > 0 AND (created_at + ttl) < ?1",
+                "DELETE FROM clips WHERE ttl > 0 AND (created_at + ttl) < ?1 AND is_pinned = 0",
                 params![now],
             )
             .map_err(|e| format!("cleanup failed: {}", e))?;
@@ -366,7 +449,7 @@ impl Database {
         // 1. Collect media paths of soon-to-be-deleted rows.
         let mut stmt = conn
             .prepare(
-                "SELECT media_path FROM clips WHERE created_at < ?1 \
+                "SELECT media_path FROM clips WHERE created_at < ?1 AND is_pinned = 0 \
                  AND media_path IS NOT NULL AND media_path != ''",
             )
             .map_err(|e| format!("prepare failed: {}", e))?;
@@ -376,9 +459,12 @@ impl Database {
             .filter_map(|r| r.ok())
             .collect();
 
-        // 2. DELETE (parameterised).
+        // 2. DELETE (parameterised). Pinned clips are exempt from retention purge.
         let deleted = conn
-            .execute("DELETE FROM clips WHERE created_at < ?1", params![cutoff])
+            .execute(
+                "DELETE FROM clips WHERE created_at < ?1 AND is_pinned = 0",
+                params![cutoff],
+            )
             .map_err(|e| format!("purge failed: {}", e))?;
 
         // 3. Cascade-delete media files (same idiom as cleanup_expired).
@@ -458,7 +544,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced
+                "SELECT id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced, is_pinned, pin_note
                  FROM clips WHERE synced = FALSE ORDER BY created_at ASC",
             )
             .map_err(|e| format!("prepare failed: {}", e))?;
@@ -477,6 +563,8 @@ impl Database {
                     created_at: row.get(8)?,
                     ttl: row.get(9)?,
                     synced: row.get::<_, bool>(10).unwrap_or(true),
+                    is_pinned: row.get::<_, i32>(11).unwrap_or(0) != 0,
+                    pin_note: row.get(12)?,
                 })
             })
             .map_err(|e| format!("query failed: {}", e))?
@@ -652,6 +740,8 @@ mod tests {
             created_at: chrono::Utc::now().timestamp(),
             ttl: 0,
             synced: true,
+            is_pinned: false,
+            pin_note: None,
         }
     }
 
@@ -1021,7 +1111,8 @@ mod tests {
         // Migration runs on Database::open.
         let db = Database::open(&tmp).unwrap();
 
-        // Column gone?
+        // is_pinned is re-added by the pin feature migration — verify it exists
+        // with the correct type and that legacy data survived.
         let conn = db.conn.lock().unwrap();
         let cols: Vec<String> = conn
             .prepare("PRAGMA table_info(clips)")
@@ -1031,8 +1122,13 @@ mod tests {
             .filter_map(|r| r.ok())
             .collect();
         assert!(
-            !cols.iter().any(|c| c == "is_pinned"),
-            "is_pinned still present: {:?}",
+            cols.iter().any(|c| c == "is_pinned"),
+            "is_pinned should be present after pin feature migration: {:?}",
+            cols
+        );
+        assert!(
+            cols.iter().any(|c| c == "pin_note"),
+            "pin_note should be present after pin feature migration: {:?}",
             cols
         );
 
@@ -1069,7 +1165,9 @@ mod tests {
             .unwrap()
             .filter_map(|r| r.ok())
             .collect();
-        assert!(!cols.iter().any(|c| c == "is_pinned"));
+        // is_pinned is re-added by pin feature migration; second open must not panic
+        assert!(cols.iter().any(|c| c == "is_pinned"));
+        assert!(cols.iter().any(|c| c == "pin_note"));
         drop(conn);
         let _ = std::fs::remove_file(&tmp);
     }

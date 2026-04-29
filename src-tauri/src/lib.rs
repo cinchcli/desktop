@@ -18,11 +18,15 @@ use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder, Event};
 
 use auth::{AuthState, AuthStateHandle};
+use protocol::MultiConfigHandle;
 
 pub fn make_specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
             commands::clips::list_clips,
+            commands::clips::list_pinned_clips,
+            commands::clips::pin_clip,
+            commands::clips::unpin_clip,
             commands::clips::search_clips,
             commands::clips::get_sources,
             commands::clips::delete_clip,
@@ -51,6 +55,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::auth::sign_out,
             commands::auth::retry_auth,
             commands::auth::handle_deeplink,
+            commands::relays::pair_with_token,
         ])
         .events(collect_events![
             events::AuthStateChanged,
@@ -67,18 +72,16 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
 pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    // Load config from ~/.cinch/config.json (read-only)
-    let config = match protocol::Config::load() {
-        Ok(c) => {
-            info!("config loaded: relay={}, user={}", c.relay_url, c.user_id);
-            c
-        }
-        Err(e) => {
-            info!("config not found ({}), starting in setup mode", e);
-            protocol::Config::default()
-        }
-    };
+    // Load MultiConfig from ~/.cinch/config.json (migrates legacy single-Config format)
+    let multi_config = protocol::MultiConfig::load();
+    let config = multi_config.to_active_config();
+    if let Some(p) = multi_config.active_profile() {
+        info!("config loaded: relay={}, user={}", p.relay_url, p.user_id);
+    } else {
+        info!("config not found, starting in setup mode");
+    }
     let is_configured = config.is_configured();
+    let active_relay_id_seed = multi_config.active_relay_id.clone().unwrap_or_default();
 
     // Open local database
     let db_path = dirs::data_dir()
@@ -97,8 +100,11 @@ pub fn run() {
     let ws_url = config.ws_url();
     let relay_url_for_backfill = config.relay_url.clone();
     let token_for_backfill = config.token.clone();
-    let config_for_state = config.clone();
     let config_for_auth_seed = config.clone();
+
+    let multi_config_handle: MultiConfigHandle = Arc::new(Mutex::new(multi_config));
+    let ws_abort_handle = Arc::new(ws::WsAbortHandle::new());
+    let pending_relay_add = Arc::new(commands::relays::PendingRelayAdd::new());
 
     // Single clipboard service shared by monitor, ws client, and Tauri commands.
     let clipboard_service = Arc::new(clipboard::ClipboardService::new_platform_default());
@@ -176,7 +182,9 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Mutex::new(tray::TrayState::new()))
         .manage(db.clone())
-        .manage(config_for_state)
+        .manage(multi_config_handle.clone())
+        .manage(ws_abort_handle.clone())
+        .manage(pending_relay_add.clone())
         .manage(clipboard_service.clone())
         .manage(ws_status.clone())
         .manage(relay_connected.clone())
@@ -204,6 +212,7 @@ pub fn run() {
                         device_id: config_for_auth_seed.active_device_id.clone(),
                         hostname: config_for_auth_seed.hostname.clone(),
                         relay_url: config_for_auth_seed.relay_url.clone(),
+                        active_relay_id: active_relay_id_seed.clone(),
                     }
                 } else {
                     AuthState::LocalOnly
@@ -224,10 +233,12 @@ pub fn run() {
                 let dl_clipboard = clipboard_service.clone();
                 let dl_ws_status = ws_status.clone();
                 let dl_relay_connected = relay_connected.clone();
+                let dl_mc = multi_config_handle.clone();
+                let dl_ws_abort = ws_abort_handle.clone();
+                let dl_pending = pending_relay_add.clone();
                 app.deep_link().on_open_url(move |event| {
                     let urls = event.urls();
                     for url in &urls {
-                        // cinch://auth/callback?token=X&device_id=Y&user_id=Z&relay_url=R
                         let is_auth =
                             url.host_str() == Some("auth") || url.path() == "/auth/callback";
                         if !is_auth {
@@ -254,27 +265,59 @@ pub fn run() {
                         if let (Some(token), Some(device_id), Some(user_id)) =
                             (token, device_id, user_id)
                         {
-                            // T-04-09: validate token format (hex, 64 chars) before accepting
                             if token.len() != 64 || !token.chars().all(|c| c.is_ascii_hexdigit()) {
                                 log::warn!("deep-link: rejected malformed token");
                                 return;
                             }
 
-                            let relay = relay_url
-                                .unwrap_or_else(|| "https://api.cinchcli.com".to_string());
+                            let relay =
+                                relay_url.unwrap_or_else(|| "https://api.cinchcli.com".to_string());
                             let hostname = std::env::var("HOSTNAME")
                                 .or_else(|_| std::env::var("COMPUTERNAME"))
                                 .unwrap_or_else(|_| "unknown".to_string());
 
-                            // Write credentials (same path as sign_in command)
-                            if let Err(e) = crate::auth::write_credentials(
-                                &user_id, &device_id, &token, &relay, &hostname,
-                            ) {
-                                log::error!("deep-link credential write failed: {}", e);
-                                return;
-                            }
+                            let pending_info = dl_pending.take();
+                            let active_relay_id = if let Some(info) = pending_info {
+                                match crate::auth::add_relay_profile(
+                                    &user_id,
+                                    &device_id,
+                                    &token,
+                                    &relay,
+                                    &hostname,
+                                    info.label.as_deref(),
+                                    "",
+                                ) {
+                                    Ok((relay_id, _)) => {
+                                        if let Ok(new_mc) = crate::auth::load_multi_config() {
+                                            let mut g = dl_mc.lock().unwrap();
+                                            *g = new_mc;
+                                        }
+                                        relay_id
+                                    }
+                                    Err(e) => {
+                                        log::error!("deep-link add_relay_profile failed: {}", e);
+                                        return;
+                                    }
+                                }
+                            } else {
+                                if let Err(e) = crate::auth::write_credentials(
+                                    &user_id, &device_id, &token, &relay, &hostname,
+                                ) {
+                                    log::error!("deep-link credential write failed: {}", e);
+                                    return;
+                                }
+                                let relay_id = crate::auth::load_multi_config()
+                                    .ok()
+                                    .and_then(|mc| {
+                                        let id = mc.active_relay_id.clone();
+                                        let mut g = dl_mc.lock().unwrap();
+                                        *g = mc;
+                                        id
+                                    })
+                                    .unwrap_or_default();
+                                relay_id
+                            };
 
-                            // Transition to Authenticated
                             crate::auth::transition(
                                 &dl_app_handle,
                                 &dl_auth_handle,
@@ -283,17 +326,17 @@ pub fn run() {
                                     device_id: device_id.clone(),
                                     hostname: hostname.clone(),
                                     relay_url: relay.clone(),
+                                    active_relay_id: active_relay_id.clone(),
                                 },
                             );
 
-                            // Spawn WS client if not already running (Pitfall 6)
                             let ws_url = format!(
                                 "wss://{}/ws",
                                 relay
                                     .trim_start_matches("https://")
                                     .trim_start_matches("http://")
                             );
-                            ws::spawn_ws_client(
+                            let join_handle = ws::spawn_ws_client(
                                 &dl_app_handle,
                                 ws_url,
                                 dl_db.clone(),
@@ -302,11 +345,13 @@ pub fn run() {
                                 dl_auth_handle.clone(),
                                 dl_relay_connected.clone(),
                             );
+                            dl_ws_abort.replace(join_handle);
 
                             log::info!(
-                                "deep-link auth complete: user={}, device={}",
+                                "deep-link auth complete: user={}, device={}, relay_id={}",
                                 user_id,
-                                device_id
+                                device_id,
+                                active_relay_id,
                             );
                         }
                     }
@@ -330,7 +375,7 @@ pub fn run() {
                 // Spawn WebSocket client
                 let ws_auth_handle: AuthStateHandle =
                     app.state::<AuthStateHandle>().inner().clone();
-                ws::spawn_ws_client(
+                let join = ws::spawn_ws_client(
                     handle,
                     ws_url.clone(),
                     db.clone(),
@@ -339,6 +384,7 @@ pub fn run() {
                     ws_auth_handle,
                     relay_connected.clone(),
                 );
+                ws_abort_handle.replace(join);
             } else {
                 // No config — show window immediately with setup instructions
                 if let Some(window) = handle.get_webview_window("main") {
@@ -443,7 +489,7 @@ fn register_global_shortcuts(app: &tauri::AppHandle) {
         .get_setting("global_shortcut")
         .ok()
         .flatten()
-        .unwrap_or_else(|| "CmdOrCtrl+Shift+V".to_string());
+        .unwrap_or_else(|| "CmdOrCtrl+Shift+W".to_string());
 
     let handle = app.clone();
     if let Err(e) =

@@ -5,7 +5,7 @@ use specta::Type;
 use tauri::State;
 
 use crate::clipboard::ClipboardService;
-use crate::protocol::{Config, ConfigInfo, DeviceInfo};
+use crate::protocol::{ConfigInfo, DeviceInfo, MultiConfigHandle};
 use crate::store::db::{Database, SourceInfo, SourceSetting};
 use crate::store::models::LocalClip;
 use crate::ws::WsStatus;
@@ -152,6 +152,28 @@ pub fn clear_local_history(db: State<'_, Arc<Database>>) -> Result<i64, String> 
 
 #[tauri::command]
 #[specta::specta]
+pub fn list_pinned_clips(db: State<'_, Arc<Database>>) -> Result<Vec<LocalClip>, String> {
+    db.list_pinned_clips()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn pin_clip(
+    db: State<'_, Arc<Database>>,
+    id: String,
+    note: Option<String>,
+) -> Result<(), String> {
+    db.pin_clip(&id, note.as_deref())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn unpin_clip(db: State<'_, Arc<Database>>, id: String) -> Result<(), String> {
+    db.unpin_clip(&id)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn list_clips(
     db: State<'_, Arc<Database>>,
     source: Option<String>,
@@ -195,11 +217,13 @@ pub fn get_clip_count(db: State<'_, Arc<Database>>) -> Result<i64, String> {
 
 #[tauri::command]
 #[specta::specta]
-pub fn get_config_info(config: State<'_, Config>) -> ConfigInfo {
+pub fn get_config_info(mc: State<'_, MultiConfigHandle>) -> ConfigInfo {
+    let guard = mc.lock().unwrap();
+    let cfg = guard.to_active_config();
     ConfigInfo {
-        relay_url: config.relay_url.clone(),
-        user_id: config.user_id.clone(),
-        hostname: config.hostname.clone(),
+        relay_url: cfg.relay_url.clone(),
+        user_id: cfg.user_id.clone(),
+        hostname: cfg.hostname.clone(),
     }
 }
 
@@ -321,14 +345,27 @@ pub fn save_config(app: tauri::AppHandle, relay_url: String, token: String) -> R
     app.restart();
 }
 
+fn resolve_active_creds(mc: &State<'_, MultiConfigHandle>) -> Result<(String, String), String> {
+    let guard = mc.lock().unwrap();
+    let profile = guard.active_profile().ok_or("no active relay configured")?;
+    let token = if profile.token.is_empty() {
+        let cfg = profile.to_config();
+        crate::auth::read_credentials(&cfg).unwrap_or_default()
+    } else {
+        profile.token.clone()
+    };
+    Ok((profile.relay_url.clone(), token))
+}
+
 #[tauri::command]
 #[specta::specta]
-pub async fn list_devices(config: State<'_, Config>) -> Result<Vec<DeviceInfo>, String> {
-    let url = format!("{}/devices", config.relay_url);
+pub async fn list_devices(mc: State<'_, MultiConfigHandle>) -> Result<Vec<DeviceInfo>, String> {
+    let (relay_url, token) = resolve_active_creds(&mc)?;
+    let url = format!("{}/devices", relay_url);
     let client = reqwest::Client::new();
     let response = client
         .get(&url)
-        .header("Authorization", format!("Bearer {}", config.token))
+        .header("Authorization", format!("Bearer {}", token))
         .send()
         .await
         .map_err(|e| format!("request failed: {}", e))?;
@@ -350,15 +387,16 @@ pub async fn list_devices(config: State<'_, Config>) -> Result<Vec<DeviceInfo>, 
 #[tauri::command]
 #[specta::specta]
 pub async fn set_device_nickname(
-    config: State<'_, Config>,
+    mc: State<'_, MultiConfigHandle>,
     device_id: String,
     nickname: String,
 ) -> Result<(), String> {
-    let url = format!("{}/devices/{}/nickname", config.relay_url, device_id);
+    let (relay_url, token) = resolve_active_creds(&mc)?;
+    let url = format!("{}/devices/{}/nickname", relay_url, device_id);
     let client = reqwest::Client::new();
     let response = client
         .put(&url)
-        .header("Authorization", format!("Bearer {}", config.token))
+        .header("Authorization", format!("Bearer {}", token))
         .json(&serde_json::json!({ "nickname": nickname }))
         .send()
         .await
@@ -374,12 +412,16 @@ pub async fn set_device_nickname(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn revoke_device(config: State<'_, Config>, device_id: String) -> Result<(), String> {
-    let url = format!("{}/auth/device/revoke", config.relay_url);
+pub async fn revoke_device(
+    mc: State<'_, MultiConfigHandle>,
+    device_id: String,
+) -> Result<(), String> {
+    let (relay_url, token) = resolve_active_creds(&mc)?;
+    let url = format!("{}/auth/device/revoke", relay_url);
     let client = reqwest::Client::new();
     let response = client
         .post(&url)
-        .header("Authorization", format!("Bearer {}", config.token))
+        .header("Authorization", format!("Bearer {}", token))
         .json(&serde_json::json!({ "device_id": device_id }))
         .send()
         .await

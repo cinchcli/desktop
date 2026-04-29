@@ -119,12 +119,18 @@ pub(crate) fn next_state_from_config(cfg: &crate::protocol::Config) -> AuthState
     if cfg.user_id.is_empty() || cfg.active_device_id.is_empty() {
         return AuthState::LocalOnly;
     }
+    let active_relay_id = credential::load_multi_config()
+        .ok()
+        .and_then(|mc| mc.active_relay_id.clone())
+        .unwrap_or_default();
+
     match credential::read_credentials(cfg) {
         Ok(_token) => AuthState::Authenticated {
             user_id: cfg.user_id.clone(),
             device_id: cfg.active_device_id.clone(),
             hostname: cfg.hostname.clone(),
             relay_url: cfg.relay_url.clone(),
+            active_relay_id: active_relay_id.clone(),
         },
         // Plaintext-fallback intent: Config has identity fields but keyring reports unavailable;
         // still treat as Authenticated so the app uses cfg.token (populated by the plaintext path).
@@ -134,6 +140,7 @@ pub(crate) fn next_state_from_config(cfg: &crate::protocol::Config) -> AuthState
                 device_id: cfg.active_device_id.clone(),
                 hostname: cfg.hostname.clone(),
                 relay_url: cfg.relay_url.clone(),
+                active_relay_id,
             }
         }
         // NoEntry or any other error → credentials are gone, flip to LocalOnly.
@@ -182,6 +189,7 @@ mod tests {
                 device_id,
                 hostname,
                 relay_url,
+                ..
             } => {
                 assert_eq!(user_id, "u1");
                 assert_eq!(device_id, "d1");

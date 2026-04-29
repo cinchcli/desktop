@@ -12,7 +12,7 @@ use keyring::error::Error as KeyringError;
 use keyring::Entry;
 use log::{info, warn};
 
-use crate::protocol::Config;
+use crate::protocol::{Config, MultiConfig, RelayProfile};
 
 pub const SERVICE_NAME: &str = "com.cinch.app";
 
@@ -47,28 +47,33 @@ fn config_path() -> Result<PathBuf, CredentialError> {
     Ok(home.join(".cinch").join("config.json"))
 }
 
-pub(crate) fn load_config() -> Result<Config, CredentialError> {
+pub fn load_multi_config() -> Result<MultiConfig, CredentialError> {
     let p = config_path()?;
     if !p.exists() {
-        return Ok(Config::default());
+        return Ok(MultiConfig::default());
     }
     let data =
         fs::read_to_string(&p).map_err(|e| CredentialError::Io(format!("read config: {}", e)))?;
-    serde_json::from_str(&data)
-        .map_err(|e| CredentialError::BadConfig(format!("parse config: {}", e)))
+    let v: serde_json::Value = serde_json::from_str(&data)
+        .map_err(|e| CredentialError::BadConfig(format!("parse config: {}", e)))?;
+    if v.get("relays").is_some() {
+        serde_json::from_value(v)
+            .map_err(|e| CredentialError::BadConfig(format!("parse multi_config: {}", e)))
+    } else {
+        let old: Config = serde_json::from_value(v)
+            .map_err(|e| CredentialError::BadConfig(format!("parse legacy config: {}", e)))?;
+        Ok(MultiConfig::from_legacy_pub(old))
+    }
 }
 
-pub(crate) fn save_config_to_disk(cfg: &Config) -> Result<(), CredentialError> {
+pub fn save_multi_config(mc: &MultiConfig) -> Result<(), CredentialError> {
     let p = config_path()?;
     if let Some(dir) = p.parent() {
         fs::create_dir_all(dir).map_err(|e| CredentialError::Io(format!("mkdir: {}", e)))?;
     }
-    let data = serde_json::to_string_pretty(cfg)
+    let data = serde_json::to_string_pretty(mc)
         .map_err(|e| CredentialError::BadConfig(format!("marshal: {}", e)))?;
-    // std::fs::write uses atomic rename on macOS/Linux — matches Go config.Save contract.
     fs::write(&p, data).map_err(|e| CredentialError::Io(format!("write config: {}", e)))?;
-    // Set mode 0600 (owner-only). On macOS/Linux, fs::write creates with default 0644 —
-    // explicitly chmod down to 0600 per D-07.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -80,6 +85,159 @@ pub(crate) fn save_config_to_disk(cfg: &Config) -> Result<(), CredentialError> {
             .map_err(|e| CredentialError::Io(format!("chmod 0600: {}", e)))?;
     }
     Ok(())
+}
+
+pub(crate) fn load_config() -> Result<Config, CredentialError> {
+    Ok(load_multi_config()?.to_active_config())
+}
+
+pub(crate) fn save_config_to_disk(cfg: &Config) -> Result<(), CredentialError> {
+    let mut mc = load_multi_config()?;
+    if let Some(profile) = mc.active_profile_mut() {
+        profile.token = cfg.token.clone();
+        profile.user_id = cfg.user_id.clone();
+        profile.relay_url = cfg.relay_url.clone();
+        profile.hostname = cfg.hostname.clone();
+        profile.device_id = cfg.active_device_id.clone();
+        profile.credential_version = cfg.credential_version;
+        profile.encryption_key = cfg.encryption_key.clone();
+        profile.device_private_key = cfg.device_private_key.clone();
+    } else {
+        let profile = RelayProfile::from_config(cfg, None);
+        let id = profile.id.clone();
+        mc.relays.push(profile);
+        mc.active_relay_id = Some(id);
+    }
+    save_multi_config(&mc)
+}
+
+/// Add a new RelayProfile to MultiConfig for a freshly-authenticated relay.
+/// Used by the deep-link callback when PendingRelayAdd is set.
+/// Returns (relay_id, backend_name).
+pub fn add_relay_profile(
+    user_id: &str,
+    device_id: &str,
+    token: &str,
+    relay_url: &str,
+    hostname: &str,
+    label: Option<&str>,
+    device_private_key: &str,
+) -> Result<(String, &'static str), CredentialError> {
+    let mut mc = load_multi_config()?;
+
+    let use_plaintext = std::env::var("CINCH_KEYRING").ok().as_deref() == Some("none");
+    let account = account_key(user_id, device_id);
+    let mut backend: &'static str = "keyring";
+    let mut stored_token = String::new();
+
+    if !use_plaintext {
+        match Entry::new(SERVICE_NAME, &account) {
+            Ok(entry) => match entry.set_password(token) {
+                Ok(()) => {}
+                Err(e) => {
+                    warn_plaintext_once(&format!("keyring set failed: {}", e));
+                    stored_token = token.to_string();
+                    backend = "plaintext";
+                }
+            },
+            Err(e) => {
+                warn_plaintext_once(&format!("keyring entry creation failed: {}", e));
+                stored_token = token.to_string();
+                backend = "plaintext";
+            }
+        }
+    } else {
+        stored_token = token.to_string();
+        backend = "plaintext";
+    }
+
+    use ulid::Ulid;
+    let relay_id = Ulid::new().to_string();
+    let label_str = label
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            url::Url::parse(relay_url)
+                .ok()
+                .and_then(|u| u.host_str().map(|h| h.to_string()))
+                .unwrap_or_else(|| relay_url.to_string())
+        });
+
+    let next_version = mc
+        .relays
+        .iter()
+        .map(|r| r.credential_version)
+        .max()
+        .unwrap_or(0)
+        .checked_add(1)
+        .ok_or_else(|| CredentialError::BadConfig("credential_version overflow".into()))?;
+
+    let profile = RelayProfile {
+        id: relay_id.clone(),
+        label: label_str,
+        relay_url: relay_url.to_string(),
+        user_id: user_id.to_string(),
+        device_id: device_id.to_string(),
+        hostname: hostname.to_string(),
+        encryption_key: String::new(),
+        device_private_key: device_private_key.to_string(),
+        credential_version: next_version,
+        token: stored_token,
+    };
+    mc.relays.push(profile);
+    // First relay or explicit request: make it the active one
+    if mc.active_relay_id.is_none() {
+        mc.active_relay_id = Some(relay_id.clone());
+    }
+    save_multi_config(&mc)?;
+    info!(
+        "add_relay_profile ({}): user={}, device={}, relay={}",
+        backend,
+        &user_id[..8.min(user_id.len())],
+        device_id,
+        relay_url
+    );
+    Ok((relay_id, backend))
+}
+
+/// Remove credentials for a specific (user_id, device_id) pair from keyring + MultiConfig.
+pub fn wipe_relay_credentials(relay_id: &str) -> Result<(), CredentialError> {
+    let mut mc = load_multi_config()?;
+    let profile = mc.relays.iter().find(|r| r.id == relay_id).cloned();
+    if let Some(p) = profile {
+        if !p.user_id.is_empty() && !p.device_id.is_empty() {
+            let account = account_key(&p.user_id, &p.device_id);
+            if let Ok(entry) = Entry::new(SERVICE_NAME, &account) {
+                if let Err(e) = entry.delete_credential() {
+                    match e {
+                        keyring::error::Error::NoEntry => {}
+                        other => warn!("keyring delete_credential: {}", other),
+                    }
+                }
+            }
+            // Also wipe encryption key keyring slot
+            let enc_account = format!("encryption:{}:{}", p.user_id, p.device_id);
+            if let Ok(entry) = Entry::new(SERVICE_NAME, &enc_account) {
+                let _ = entry.delete_credential();
+            }
+        }
+    }
+    mc.relays.retain(|r| r.id != relay_id);
+    if mc.active_relay_id.as_deref() == Some(relay_id) {
+        mc.active_relay_id = mc.relays.first().map(|r| r.id.clone());
+    }
+    let new_version = mc
+        .relays
+        .iter()
+        .map(|r| r.credential_version)
+        .max()
+        .unwrap_or(0)
+        .checked_add(1)
+        .ok_or_else(|| CredentialError::BadConfig("credential_version overflow".into()))?;
+    if let Some(p) = mc.active_profile_mut() {
+        p.credential_version = new_version;
+    }
+    save_multi_config(&mc)
 }
 
 fn warn_plaintext_once(reason: &str) {

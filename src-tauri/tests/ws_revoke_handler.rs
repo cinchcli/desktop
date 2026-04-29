@@ -13,6 +13,7 @@ fn ws_revoked_transitions_to_local_only() {
         device_id: "d".into(),
         hostname: "h".into(),
         relay_url: "r".into(),
+        active_relay_id: String::new(),
     };
     let next = classify_next_state(
         &current,
@@ -30,6 +31,7 @@ fn ws_invalid_token_transitions_to_local_only() {
         device_id: "d".into(),
         hostname: "h".into(),
         relay_url: "r".into(),
+        active_relay_id: String::new(),
     };
     let next = classify_next_state(
         &current,

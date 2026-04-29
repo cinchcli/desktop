@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -150,6 +152,163 @@ fn default_relay_url() -> String {
     "http://localhost:8080".to_string()
 }
 
+// ─── Multi-relay types ───────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelayProfile {
+    pub id: String,
+    pub label: String,
+    pub relay_url: String,
+    pub user_id: String,
+    pub device_id: String,
+    pub hostname: String,
+    #[serde(default)]
+    pub encryption_key: String,
+    #[serde(default)]
+    pub device_private_key: String,
+    #[serde(default)]
+    pub credential_version: u64,
+    #[serde(default)]
+    pub token: String,
+}
+
+impl RelayProfile {
+    pub fn from_config(cfg: &Config, label: Option<String>) -> Self {
+        use ulid::Ulid;
+        let id = Ulid::new().to_string();
+        let label = label.unwrap_or_else(|| {
+            url::Url::parse(&cfg.relay_url)
+                .ok()
+                .and_then(|u| u.host_str().map(|h| h.to_string()))
+                .unwrap_or_else(|| cfg.relay_url.clone())
+        });
+        Self {
+            id,
+            label,
+            relay_url: cfg.relay_url.clone(),
+            user_id: cfg.user_id.clone(),
+            device_id: cfg.active_device_id.clone(),
+            hostname: cfg.hostname.clone(),
+            encryption_key: cfg.encryption_key.clone(),
+            device_private_key: cfg.device_private_key.clone(),
+            credential_version: cfg.credential_version,
+            token: cfg.token.clone(),
+        }
+    }
+
+    pub fn to_config(&self) -> Config {
+        Config {
+            token: self.token.clone(),
+            user_id: self.user_id.clone(),
+            relay_url: self.relay_url.clone(),
+            hostname: self.hostname.clone(),
+            active_device_id: self.device_id.clone(),
+            credential_version: self.credential_version,
+            encryption_key: self.encryption_key.clone(),
+            device_private_key: self.device_private_key.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct RelayProfileSummary {
+    pub id: String,
+    pub label: String,
+    pub relay_url: String,
+    pub user_id: String,
+    pub hostname: String,
+    pub is_active: bool,
+    pub device_count: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MultiConfig {
+    #[serde(default)]
+    pub active_relay_id: Option<String>,
+    #[serde(default)]
+    pub relays: Vec<RelayProfile>,
+}
+
+pub type MultiConfigHandle = Arc<Mutex<MultiConfig>>;
+
+impl MultiConfig {
+    pub fn load() -> Self {
+        let Some(home) = dirs::home_dir() else {
+            return Self::default();
+        };
+        let path = home.join(".cinch").join("config.json");
+        if !path.exists() {
+            return Self::default();
+        }
+        let Ok(data) = std::fs::read_to_string(&path) else {
+            return Self::default();
+        };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) else {
+            return Self::default();
+        };
+        if v.get("relays").is_some() {
+            serde_json::from_value(v).unwrap_or_default()
+        } else {
+            let old: Config = match serde_json::from_value(v) {
+                Ok(c) => c,
+                Err(_) => return Self::default(),
+            };
+            Self::from_legacy(old)
+        }
+    }
+
+    pub fn save(&self) -> Result<(), String> {
+        let home = dirs::home_dir().ok_or("cannot determine home directory")?;
+        let dir = home.join(".cinch");
+        std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir: {}", e))?;
+        let path = dir.join("config.json");
+        let data = serde_json::to_string_pretty(self).map_err(|e| format!("marshal: {}", e))?;
+        std::fs::write(&path, &data).map_err(|e| format!("write: {}", e))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(&path) {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o600);
+                let _ = std::fs::set_permissions(&path, perms);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn active_profile(&self) -> Option<&RelayProfile> {
+        let id = self.active_relay_id.as_deref()?;
+        self.relays.iter().find(|r| r.id == id)
+    }
+
+    pub fn active_profile_mut(&mut self) -> Option<&mut RelayProfile> {
+        let id = self.active_relay_id.clone()?;
+        self.relays.iter_mut().find(|r| r.id == id)
+    }
+
+    pub fn to_active_config(&self) -> Config {
+        self.active_profile()
+            .map(|p| p.to_config())
+            .unwrap_or_default()
+    }
+
+    pub fn from_legacy_pub(old: Config) -> Self {
+        Self::from_legacy(old)
+    }
+
+    fn from_legacy(old: Config) -> Self {
+        if old.user_id.is_empty() && old.token.is_empty() {
+            return Self::default();
+        }
+        let profile = RelayProfile::from_config(&old, None);
+        let id = profile.id.clone();
+        Self {
+            active_relay_id: Some(id),
+            relays: vec![profile],
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -171,19 +330,12 @@ impl Config {
     }
 
     pub fn load() -> Result<Self, String> {
-        let home = dirs::home_dir().ok_or("cannot determine home directory")?;
-        let path = home.join(".cinch").join("config.json");
-        if !path.exists() {
-            return Err(format!("config not found at {}", path.display()));
+        let mc = MultiConfig::load();
+        let cfg = mc.to_active_config();
+        if cfg.user_id.is_empty() && cfg.token.is_empty() {
+            return Err("no active relay configured — run: cinch auth login".to_string());
         }
-        let data =
-            std::fs::read_to_string(&path).map_err(|e| format!("failed to read config: {}", e))?;
-        let config: Config =
-            serde_json::from_str(&data).map_err(|e| format!("failed to parse config: {}", e))?;
-        if config.token.is_empty() {
-            return Err("token is empty — run: cinch auth login".to_string());
-        }
-        Ok(config)
+        Ok(cfg)
     }
 
     pub fn ws_url(&self) -> String {

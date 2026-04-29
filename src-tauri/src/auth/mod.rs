@@ -5,7 +5,8 @@ pub mod propagate;
 pub mod state; // Plan 02 Task 3 seeded the skeleton; Plan 03 Task 1 extends with events + classify_next_state + Backoff + tests
 
 pub use credential::{
-    read_credentials, rotate_credentials, wipe_credentials, write_credentials, CredentialError,
+    add_relay_profile, load_multi_config, read_credentials, rotate_credentials, save_multi_config,
+    wipe_credentials, wipe_relay_credentials, write_credentials, CredentialError,
 };
 
 // Re-export AuthState primitives so downstream modules (propagate.rs, ws.rs, commands/auth.rs)

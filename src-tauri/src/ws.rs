@@ -34,6 +34,31 @@ impl WsStatus {
     }
 }
 
+/// Holds the abort handle for the active WebSocket task so `set_active_relay`
+/// can tear it down before spawning a replacement.
+pub struct WsAbortHandle(pub std::sync::Mutex<Option<tauri::async_runtime::JoinHandle<()>>>);
+
+impl WsAbortHandle {
+    pub fn new() -> Self {
+        Self(std::sync::Mutex::new(None))
+    }
+
+    pub fn replace(&self, handle: tauri::async_runtime::JoinHandle<()>) {
+        let mut guard = self.0.lock().unwrap();
+        if let Some(old) = guard.take() {
+            old.abort();
+        }
+        *guard = Some(handle);
+    }
+
+    pub fn abort(&self) {
+        let mut guard = self.0.lock().unwrap();
+        if let Some(h) = guard.take() {
+            h.abort();
+        }
+    }
+}
+
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(300);
 
 type WsSink = futures_util::stream::SplitSink<
@@ -49,9 +74,9 @@ pub fn spawn_ws_client(
     ws_status: Arc<WsStatus>,
     auth_handle: AuthStateHandle,
     relay_connected: Arc<AtomicBool>,
-) {
+) -> tauri::async_runtime::JoinHandle<()> {
     let app_handle = app.clone();
-    tauri::async_runtime::spawn(async move {
+    return tauri::async_runtime::spawn(async move {
         let mut backoff = crate::auth::Backoff::new();
         loop {
             info!("connecting to relay: {}", redact_token(&ws_url));
@@ -413,15 +438,17 @@ async fn handle_text_message(
                 Ok(backend) => {
                     log::info!("token_rotated persisted via {}", backend);
                     // Re-read cfg for relay_url and emit Authenticated.
-                    if let Ok(cfg) = crate::protocol::Config::load() {
+                    let mc = crate::protocol::MultiConfig::load();
+                    if let Some(p) = mc.active_profile() {
                         crate::auth::transition(
                             app,
                             auth_handle,
                             crate::auth::AuthState::Authenticated {
-                                user_id: cfg.user_id,
-                                device_id: cfg.active_device_id,
-                                hostname: cfg.hostname,
-                                relay_url: cfg.relay_url,
+                                user_id: p.user_id.clone(),
+                                device_id: p.device_id.clone(),
+                                hostname: p.hostname.clone(),
+                                relay_url: p.relay_url.clone(),
+                                active_relay_id: p.id.clone(),
                             },
                         );
                     }

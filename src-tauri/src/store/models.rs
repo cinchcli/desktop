@@ -16,6 +16,8 @@ pub struct LocalClip {
     pub created_at: i64, // unix timestamp
     pub ttl: i64,
     pub synced: bool,
+    pub is_pinned: bool,
+    pub pin_note: Option<String>,
 }
 
 impl LocalClip {
@@ -35,6 +37,8 @@ impl LocalClip {
             created_at,
             ttl: clip.ttl,
             synced: true,
+            is_pinned: false,
+            pin_note: None,
         }
     }
 }
