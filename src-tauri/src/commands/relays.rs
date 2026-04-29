@@ -30,6 +30,7 @@ impl PendingRelayAdd {
     pub fn take(&self) -> Option<PendingRelayInfo> {
         self.0.lock().unwrap().take()
     }
+    #[allow(dead_code)]
     pub fn set(&self, info: PendingRelayInfo) {
         *self.0.lock().unwrap() = Some(info);
     }
@@ -55,6 +56,7 @@ pub struct PairWithTokenResult {
 /// Clears any existing relay and replaces it with the new one.
 #[tauri::command]
 #[specta::specta]
+#[allow(clippy::too_many_arguments)]
 pub async fn pair_with_token(
     app: AppHandle,
     mc: State<'_, MultiConfigHandle>,

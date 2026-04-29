@@ -51,6 +51,7 @@ impl WsAbortHandle {
         *guard = Some(handle);
     }
 
+    #[allow(dead_code)]
     pub fn abort(&self) {
         let mut guard = self.0.lock().unwrap();
         if let Some(h) = guard.take() {
@@ -76,7 +77,7 @@ pub fn spawn_ws_client(
     relay_connected: Arc<AtomicBool>,
 ) -> tauri::async_runtime::JoinHandle<()> {
     let app_handle = app.clone();
-    return tauri::async_runtime::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let mut backoff = crate::auth::Backoff::new();
         loop {
             info!("connecting to relay: {}", redact_token(&ws_url));
@@ -116,7 +117,7 @@ pub fn spawn_ws_client(
             info!("reconnecting in {}ms...", delay.as_millis());
             time::sleep(delay).await;
         }
-    });
+    })
 }
 
 async fn connect_and_listen(
@@ -801,6 +802,7 @@ fn redact_token(url: &str) -> String {
 /// Testable pure function: classify a WS 401 body string into a Ws401Reason.
 /// Used by the connect_and_listen error handler.
 #[cfg(test)]
+#[allow(dead_code)]
 pub fn dispatch_ws_401_for_test(body: &str) -> crate::auth::Ws401Reason {
     if body.contains("device_revoked") {
         crate::auth::Ws401Reason::DeviceRevoked

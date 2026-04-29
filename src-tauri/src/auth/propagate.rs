@@ -176,12 +176,14 @@ mod tests {
 
     #[test]
     fn next_state_plaintext_token_is_authenticated() {
-        let mut cfg = crate::protocol::Config::default();
-        cfg.user_id = "u1".into();
-        cfg.active_device_id = "d1".into();
-        cfg.token = "plaintext-token".into();
-        cfg.hostname = "laptop".into();
-        cfg.relay_url = "http://localhost:8080".into();
+        let cfg = crate::protocol::Config {
+            user_id: "u1".into(),
+            active_device_id: "d1".into(),
+            token: "plaintext-token".into(),
+            hostname: "laptop".into(),
+            relay_url: "http://localhost:8080".into(),
+            ..Default::default()
+        };
         // read_credentials short-circuits on non-empty cfg.token (per credential.rs logic from Task 3).
         match next_state_from_config(&cfg) {
             AuthState::Authenticated {
