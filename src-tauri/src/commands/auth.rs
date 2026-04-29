@@ -69,7 +69,10 @@ pub async fn sign_in(
 
     if !dc_resp.status().is_success() {
         transition(&app, &handle, AuthState::LocalOnly);
-        return Err(format!("device-code request failed: HTTP {}", dc_resp.status()));
+        return Err(format!(
+            "device-code request failed: HTTP {}",
+            dc_resp.status()
+        ));
     }
 
     let dc: serde_json::Value = dc_resp
@@ -81,10 +84,7 @@ pub async fn sign_in(
         .as_str()
         .ok_or("missing device_code in response")?
         .to_string();
-    let user_code = dc["user_code"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
+    let user_code = dc["user_code"].as_str().unwrap_or("").to_string();
     let verification_uri = dc["verification_uri"]
         .as_str()
         .ok_or("missing verification_uri in response")?
@@ -106,7 +106,10 @@ pub async fn sign_in(
     let relay2 = relay.clone();
     let poll_url = format!("{}/auth/device-code/poll?code={}", relay, device_code);
     let mc: MultiConfigHandle = app.state::<MultiConfigHandle>().inner().clone();
-    let db = app.state::<Arc<crate::store::db::Database>>().inner().clone();
+    let db = app
+        .state::<Arc<crate::store::db::Database>>()
+        .inner()
+        .clone();
     let clipboard = app
         .state::<Arc<crate::clipboard::ClipboardService>>()
         .inner()
@@ -120,8 +123,7 @@ pub async fn sign_in(
 
     tauri::async_runtime::spawn(async move {
         let client = reqwest::Client::new();
-        let deadline = tokio::time::Instant::now()
-            + std::time::Duration::from_secs(5 * 60);
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5 * 60);
 
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
@@ -174,9 +176,9 @@ pub async fn sign_in(
             }
 
             // Write credentials to disk / keychain.
-            if let Err(e) = crate::auth::write_credentials(
-                &user_id, &device_id, &token, &relay2, &hostname,
-            ) {
+            if let Err(e) =
+                crate::auth::write_credentials(&user_id, &device_id, &token, &relay2, &hostname)
+            {
                 log::error!("sign_in: credential write failed: {}", e);
                 transition(&app2, &handle2, AuthState::LocalOnly);
                 return;
@@ -214,13 +216,21 @@ pub async fn sign_in(
                     .trim_start_matches("http://")
             );
             let jh = crate::ws::spawn_ws_client(
-                &app2, ws_url, db, clipboard, ws_status, handle2, relay_connected,
+                &app2,
+                ws_url,
+                db,
+                clipboard,
+                ws_status,
+                handle2,
+                relay_connected,
             );
             ws_abort.replace(jh);
 
             log::info!(
                 "sign_in: complete via polling: user={}, device={}, relay_id={}",
-                user_id, device_id, active_relay_id,
+                user_id,
+                device_id,
+                active_relay_id,
             );
             return;
         }
