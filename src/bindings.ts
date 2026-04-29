@@ -6,6 +6,9 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 /** Commands */
 export const commands = {
 	listClips: (source: string | null, contentType: string | null, limit: number | null) => typedError<LocalClip[], string>(__TAURI_INVOKE("list_clips", { source, contentType, limit })),
+	listPinnedClips: () => typedError<LocalClip[], string>(__TAURI_INVOKE("list_pinned_clips")),
+	pinClip: (id: string, note: string | null) => typedError<null, string>(__TAURI_INVOKE("pin_clip", { id, note })),
+	unpinClip: (id: string) => typedError<null, string>(__TAURI_INVOKE("unpin_clip", { id })),
 	searchClips: (query: string, limit: number | null) => typedError<LocalClip[], string>(__TAURI_INVOKE("search_clips", { query, limit })),
 	getSources: () => typedError<SourceInfo[], string>(__TAURI_INVOKE("get_sources")),
 	deleteClip: (id: string) => typedError<null, string>(__TAURI_INVOKE("delete_clip", { id })),
@@ -45,15 +48,21 @@ export const commands = {
 	// Returns the current AuthState. Used by AuthProvider's initial fetch in React.
 	getAuthState: () => __TAURI_INVOKE<AuthState>("get_auth_state"),
 	/**
-	 *  sign_in — opens the relay's browser auth page in the system browser.
+	 *  sign_in — browser-based sign-in using device-code polling.
 	 * 
-	 *  Phase 4 flow:
+	 *  Flow (deep-link-independent):
 	 *    1. Transitions to Authenticating{SigningIn}
-	 *    2. Opens {relay_url}/auth/browser in the system browser via tauri_plugin_opener
-	 *    3. Returns immediately — the deep-link callback (cinch://auth/callback) handles
-	 *       credential write + state transition when the browser redirects back.
+	 *    2. POSTs to {relay_url}/auth/device-code to get a device_code + verification_uri
+	 *    3. Opens verification_uri in the system browser (includes device_code so OAuth
+	 *       providers show the right page and the relay can complete the flow)
+	 *    4. Returns immediately — a background tokio task polls
+	 *       GET {relay_url}/auth/device-code/poll?code={device_code} every 3 seconds
+	 *    5. When status == "complete", writes credentials and transitions to Authenticated
+	 * 
+	 *  The existing cinch://auth/callback deep-link handler in lib.rs still fires as a
+	 *  secondary path (legacy self-host servers that skip the device-code completion step).
 	 */
-	signIn: (relayUrl: string) => typedError<null, string>(__TAURI_INVOKE("sign_in", { relayUrl })),
+	signIn: (relayUrl: string, provider: string | null) => typedError<null, string>(__TAURI_INVOKE("sign_in", { relayUrl, provider })),
 	/**
 	 *  sign_out — calls POST /auth/device/revoke (best-effort), wipes credentials, transitions to LocalOnly.
 	 *  Mirrors the CLI `auth logout` D-10 behavior.
@@ -73,6 +82,11 @@ export const commands = {
 	 *  and spawns WS client.
 	 */
 	handleDeeplink: (url: string) => typedError<null, string>(__TAURI_INVOKE("handle_deeplink", { url })),
+	/**
+	 *  Pair with a relay using a master token obtained from `cinch auth login`.
+	 *  Clears any existing relay and replaces it with the new one.
+	 */
+	pairWithToken: (req: PairWithTokenRequest) => typedError<PairWithTokenResult, string>(__TAURI_INVOKE("pair_with_token", { req })),
 };
 
 /** Events */
@@ -98,6 +112,7 @@ export type AuthState = { variant: "LocalOnly" } | { variant: "Authenticating"; 
 	device_id: string,
 	hostname: string,
 	relay_url: string,
+	active_relay_id: string,
 } } | { variant: "ErrorRecoverable"; payload: {
 	reason: AuthErrorReason,
 	retry_after_ms: number | null,
@@ -142,9 +157,23 @@ export type LocalClip = {
 	created_at: number,
 	ttl: number,
 	synced: boolean,
+	is_pinned: boolean,
+	pin_note: string | null,
 };
 
 export type NewSourceDetected = string;
+
+export type PairWithTokenRequest = {
+	relay_url: string,
+	pair_token: string,
+	label: string | null,
+};
+
+export type PairWithTokenResult = {
+	relay_id: string,
+	user_id: string,
+	device_id: string,
+};
 
 /**
  *  Settings-pane retention config (plan 01-06).

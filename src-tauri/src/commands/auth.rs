@@ -39,6 +39,7 @@ pub async fn sign_in(
     app: AppHandle,
     handle: State<'_, AuthStateHandle>,
     relay_url: String,
+    provider: Option<String>,
 ) -> Result<(), String> {
     transition(
         &app,
@@ -80,13 +81,23 @@ pub async fn sign_in(
         .as_str()
         .ok_or("missing device_code in response")?
         .to_string();
+    let user_code = dc["user_code"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
     let verification_uri = dc["verification_uri"]
         .as_str()
         .ok_or("missing verification_uri in response")?
         .to_string();
 
-    // Step 2: Open the browser at the verification URI (contains the device_code).
-    tauri_plugin_opener::open_url(&verification_uri, None::<&str>)
+    // Step 2: Open the browser — directly at the provider's OAuth start URL if
+    // a provider was specified, otherwise at the relay's provider-selection page.
+    let browser_url = if let Some(p) = &provider {
+        format!("{}/auth/oauth/{}/start?device_code={}", relay, p, user_code)
+    } else {
+        verification_uri
+    };
+    tauri_plugin_opener::open_url(&browser_url, None::<&str>)
         .map_err(|e| format!("failed to open browser: {}", e))?;
 
     // Step 3: Spawn a background task that polls until the user completes OAuth.

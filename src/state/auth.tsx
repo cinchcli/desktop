@@ -26,6 +26,7 @@ export type AuthenticatedPayload = {
     device_id: string;
     hostname: string;
     relay_url: string;
+    active_relay_id: string;
 };
 
 export type ErrorRecoverablePayload = {
@@ -111,10 +112,16 @@ export function useAuthState(): AuthState {
     return useContext(AuthContext);
 }
 
+export function useActiveRelayId(): string | null {
+    const state = useContext(AuthContext);
+    if (state.variant === 'Authenticated') return state.payload.active_relay_id;
+    return null;
+}
+
 // Imperative actions — thin wrappers over typed commands.
 // React components call these; Rust owns all state transitions.
-export async function signIn(relay_url: string): Promise<void> {
-    await unwrap(commands.signIn(relay_url));
+export async function signIn(relay_url: string, provider?: string): Promise<void> {
+    await unwrap(commands.signIn(relay_url, provider ?? null));
 }
 
 export async function signOut(): Promise<void> {
