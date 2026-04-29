@@ -9,6 +9,10 @@ vi.mock('@tauri-apps/api/core', () => ({
 vi.mock('@tauri-apps/api/event', () => ({
     listen: vi.fn(() => Promise.resolve(() => {})),
 }));
+vi.mock('@tauri-apps/plugin-deep-link', () => ({
+    onOpenUrl: vi.fn(() => Promise.resolve(() => {})),
+    getCurrent: vi.fn(() => Promise.resolve(null)),
+}));
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';

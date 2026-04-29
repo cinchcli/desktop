@@ -9,6 +9,10 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve([])
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(() => Promise.resolve(() => {})),
 }));
+vi.mock('@tauri-apps/plugin-deep-link', () => ({
+  onOpenUrl: vi.fn(() => Promise.resolve(() => {})),
+  getCurrent: vi.fn(() => Promise.resolve(null)),
+}));
 
 // Must import after mocks
 import { LocalOnlyView } from './LocalOnlyView';
@@ -91,12 +95,14 @@ describe('LocalOnlyView', () => {
 
     render(<LocalOnlyView {...defaultProps} />);
 
-    expect(screen.getByText('Sign in for cross-machine sync')).toBeInTheDocument();
+    // Text is split across a <button> and a sibling text node inside a <span>;
+    // check the interactive "Sign in" button instead of the composite string.
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument();
 
     const dismissBtn = screen.getByLabelText('Dismiss upgrade prompt');
     await userEvent.click(dismissBtn);
 
-    expect(screen.queryByText('Sign in for cross-machine sync')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sign in' })).not.toBeInTheDocument();
   });
 
   it('renders loading skeleton before list_clips resolves', async () => {

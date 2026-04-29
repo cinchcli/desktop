@@ -2,13 +2,20 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
+vi.mock('@tauri-apps/plugin-deep-link', () => ({
+  onOpenUrl: vi.fn(() => Promise.resolve(() => {})),
+  getCurrent: vi.fn(() => Promise.resolve(null)),
+}));
 
 import { UpgradePrompt } from './UpgradePrompt';
 
 describe('UpgradePrompt', () => {
   it('renders "Sign in for cross-machine sync" copy', () => {
     render(<UpgradePrompt onDismiss={vi.fn()} />);
-    expect(screen.getByText('Sign in for cross-machine sync')).toBeInTheDocument();
+    // Text is split: <button>Sign in</button> + text node "for cross-machine sync".
+    // Check the interactive button and adjacent text separately.
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument();
+    expect(screen.getByText('for cross-machine sync')).toBeInTheDocument();
   });
 
   it('renders dismiss button with aria-label "Dismiss upgrade prompt"', () => {
