@@ -401,7 +401,9 @@ async fn handle_text_message(
                 if let Err(e) = db.delete_clip(&clip.clip_id) {
                     error!("db delete failed: {}", e);
                 }
-                crate::events::ClipDeleted(clip.clip_id.clone()).emit(app).ok();
+                crate::events::ClipDeleted(clip.clip_id.clone())
+                    .emit(app)
+                    .ok();
             }
         }
         ACTION_REVOKED => {
