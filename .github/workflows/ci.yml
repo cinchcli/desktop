@@ -39,8 +39,16 @@ jobs:
       - name: Cargo fmt
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 
-      - name: Cargo clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-
-      - name: Cargo check
-        run: cargo check --manifest-path src-tauri/Cargo.toml
+      # cargo clippy + cargo check require the cinch + relay sibling
+      # checkouts (path-dep on client-core, proto-cinch's build.rs reads
+      # relay/proto). The default GITHUB_TOKEN can't fetch the private
+      # cinchcli/cinch + cinchcli/relay repos. Disabled until a PAT with
+      # cross-repo read access is wired in via secrets, or the sibling
+      # repos are made public.
+      # TODO(infra): re-enable after cross-repo access is set up.
+      #
+      # - name: Cargo clippy
+      #   run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      #
+      # - name: Cargo check
+      #   run: cargo check --manifest-path src-tauri/Cargo.toml

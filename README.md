@@ -1,8 +1,8 @@
 # Cinch Desktop
 
-macOS clipboard manager that syncs across your machines via a Cinch relay server.
+Copy from any terminal. Paste anywhere — including your Mac.
 
-Copy on a remote SSH box, paste on your Mac. Copy locally, pull it anywhere. Cinch Desktop gives you a persistent, searchable clipboard history with real-time WebSocket delivery.
+Cinch Desktop is the macOS companion for Cinch: every `cinch push` from a remote SSH box, Docker container, or CI job lands in your system clipboard before you reach Cmd+V. Comes with persistent, searchable local history and real-time WebSocket delivery.
 
 ## Requirements
 

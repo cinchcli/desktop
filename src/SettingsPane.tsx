@@ -15,6 +15,9 @@ import { C } from "./design";
 import { IconX } from "./icons";
 import ConfirmDialog from "./ConfirmDialog";
 import RetentionSlider from "./RetentionSlider";
+import { AddRelayDialog } from "./components/AddRelayDialog";
+import { DeviceDashboard } from "./components/DeviceDashboard";
+import { useAuthState, signOut } from "./state/auth";
 
 interface SettingsPaneProps {
   onClose: () => void;
@@ -50,6 +53,10 @@ async function registerWindowShortcut(shortcut: string): Promise<void> {
 
 export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) {
   const titleId = useId();
+  const auth = useAuthState();
+  const [activeTab, setActiveTab] = useState<"general" | "servers">("general");
+  const [addRelayOpen, setAddRelayOpen] = useState(false);
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [clearOpen, setClearOpen] = useState(false);
   const [purgeDialog, setPurgeDialog] = useState<{
@@ -61,8 +68,8 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
   const [destructiveHovered, setDestructiveHovered] = useState(false);
 
   // Global shortcut state (D-08)
-  const [currentShortcut, setCurrentShortcut] = useState<string>("CmdOrCtrl+Shift+V");
-  const [shortcutInput, setShortcutInput] = useState<string>("\u2318\u21E7V");
+  const [currentShortcut, setCurrentShortcut] = useState<string>("CmdOrCtrl+Shift+W");
+  const [shortcutInput, setShortcutInput] = useState<string>("\u2318\u21E7W");
   const [shortcutError, setShortcutError] = useState<string | null>(null);
   const [shortcutSaving, setShortcutSaving] = useState(false);
 
@@ -361,19 +368,111 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
             <IconX size={14} />
           </button>
         </div>
-        <div style={styles.subtitle}>Clipboard privacy and retention.</div>
 
-        {state.kind === "loading" && (
+        {/* Tab bar */}
+        <div style={{ display: "flex", gap: 4, marginBottom: 24, borderBottom: `1px solid ${C.border}`, paddingBottom: 0 }}>
+          {(["general", "servers"] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: activeTab === tab ? `2px solid ${C.accent}` : "2px solid transparent",
+                color: activeTab === tab ? C.t1 : C.t3,
+                fontSize: 13,
+                fontWeight: 500,
+                letterSpacing: "0.3px",
+                padding: "6px 12px",
+                cursor: "pointer",
+                textTransform: "capitalize",
+                transition: "color 120ms",
+              }}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+
+        {/* Servers tab */}
+        {activeTab === "servers" && (
+          <>
+            {/* Relay Server */}
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.t2, letterSpacing: "0.3px", marginBottom: 10 }}>
+              Relay server
+            </div>
+            {auth.variant === "Authenticated" ? (
+              <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 16px", marginBottom: 24 }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: C.t1, marginBottom: 2 }}>
+                  {(() => { try { return new URL(auth.payload.relay_url).host; } catch { return auth.payload.relay_url; } })()}
+                </div>
+                <div style={{ fontSize: 11, color: C.t3, marginBottom: 12 }}>{auth.payload.user_id}</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setAddRelayOpen(true)}
+                    style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 5, color: C.t2, fontSize: 11, fontWeight: 500, padding: "4px 10px", cursor: "pointer" }}
+                  >
+                    Re-authenticate
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDisconnectOpen(true)}
+                    style={{ background: "none", border: `1px solid rgba(255,99,99,0.3)`, borderRadius: 5, color: C.error, fontSize: 11, fontWeight: 500, padding: "4px 10px", cursor: "pointer" }}
+                  >
+                    Disconnect
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 16px", marginBottom: 24 }}>
+                <div style={{ fontSize: 13, color: C.t3, marginBottom: 10 }}>No relay connected.</div>
+                <button
+                  type="button"
+                  onClick={() => setAddRelayOpen(true)}
+                  style={{ background: C.accent, color: C.accentOn, border: "none", borderRadius: 5, fontSize: 12, fontWeight: 600, padding: "6px 14px", cursor: "pointer" }}
+                >
+                  Connect to relay
+                </button>
+              </div>
+            )}
+
+            {/* Remote Machines */}
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.t2, letterSpacing: "0.3px", marginBottom: 10 }}>
+              Remote machines
+            </div>
+            <DeviceDashboard
+              currentDeviceID={auth.variant === "Authenticated" ? auth.payload.device_id : ""}
+              onShowToast={() => {}}
+            />
+
+            {addRelayOpen && <AddRelayDialog onClose={() => setAddRelayOpen(false)} />}
+            <ConfirmDialog
+              open={disconnectOpen}
+              title="Disconnect from relay?"
+              body="This will sign out and remove your credentials. Your local clip history is kept."
+              primaryLabel="Disconnect"
+              secondaryLabel="Cancel"
+              tone="destructive"
+              onConfirm={async () => { setDisconnectOpen(false); await signOut(); onClose(); }}
+              onCancel={() => setDisconnectOpen(false)}
+            />
+          </>
+        )}
+
+        {/* General tab */}
+        {activeTab === "general" && state.kind === "loading" && (
           <div style={styles.loading}>Loading retention settings…</div>
         )}
 
-        {state.kind === "error" && (
+        {activeTab === "general" && state.kind === "error" && (
           <div style={styles.errorRegion}>
             Couldn't load settings: {state.message}
           </div>
         )}
 
-        {state.kind === "ready" && (
+        {activeTab === "general" && state.kind === "ready" && (
           <>
             <div style={styles.section}>
               <RetentionSlider

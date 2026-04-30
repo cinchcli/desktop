@@ -17,6 +17,7 @@ tauri-build = { version = "2", features = [] }
 # target-scoped dependencies table at the bottom of this file — do NOT
 # branch inside the Rust source with `#[cfg(not(target_os = "macos"))]`.
 [dependencies]
+client-core = { path = "../../cinch/crates/client-core", features = ["specta"] }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "2"
@@ -41,7 +42,6 @@ objc = "0.2"
 sha2 = "0.11"
 ulid = "1"
 image = { version = "0.25", default-features = false, features = ["png", "tiff"] }
-keyring = { version = "3", features = ["apple-native"] }
 notify = "8"
 notify-debouncer-full = "0.7"
 aes-gcm = "0.10"
@@ -55,7 +55,3 @@ tauri-specta = { version = "2.0.0-rc.24", features = ["derive", "typescript"] }
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
 
-[profile.release]
-lto = "thin"
-codegen-units = 1
-strip = true

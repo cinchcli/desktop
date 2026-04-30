@@ -13,13 +13,18 @@
 		"windows": [
 			{
 				"title": "Cinch",
-				"width": 1080,
-				"height": 640,
-				"visible": false
+				"width": 900,
+				"height": 580,
+				"visible": false,
+				"decorations": false,
+				"transparent": true,
+				"shadow": true,
+				"resizable": false,
+				"backgroundColor": [0, 0, 0, 0]
 			}
 		],
 		"security": {
-			"csp": null
+			"csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' cinch: data: blob:; connect-src 'self' ipc: http://ipc.localhost; font-src 'self' data:"
 		}
 	},
 	"bundle": {
