@@ -26,7 +26,7 @@ impl LocalClip {
         let created_at = parse_timestamp(&clip.created_at);
 
         Self {
-            id: clip.id.clone(),
+            id: clip.clip_id.clone(),
             user_id: clip.user_id.clone(),
             content: clip.content.clone(),
             content_type,
@@ -35,7 +35,7 @@ impl LocalClip {
             byte_size: clip.byte_size,
             media_path: clip.media_path.clone(),
             created_at,
-            ttl: clip.ttl,
+            ttl: clip.ttl.unwrap_or(0),
             synced: true,
             is_pinned: false,
             pin_note: None,
@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn test_from_proto() {
         let proto = ProtoClip {
-            id: "test123".into(),
+            clip_id: "test123".into(),
             user_id: "user1".into(),
             content: r#"{"error": "timeout"}"#.into(),
             content_type: "text".into(),
@@ -141,7 +141,7 @@ mod tests {
             byte_size: 20,
             media_path: None,
             created_at: "2026-04-14T12:00:00Z".into(),
-            ttl: 0,
+            ttl: None,
             encrypted: false,
         };
         let local = LocalClip::from_proto(&proto);

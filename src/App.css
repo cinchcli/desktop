@@ -102,7 +102,7 @@ html {
   line-height: 1.6;
   font-weight: 400;
   color: var(--text-primary);
-  background-color: var(--bg);
+  background-color: transparent !important;
 
   /* Inter OpenType features — calt, kern, liga, ss03 per DESIGN.md */
   font-feature-settings: 'calt' 1, 'kern' 1, 'liga' 1, 'ss03' 1;
@@ -112,10 +112,21 @@ html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-text-size-adjust: 100%;
+  border-radius: 12px;
+  overflow: hidden;
 }
 
 body {
   overflow: hidden;
+  border-radius: 12px;
+  background-color: transparent;
+}
+
+#root {
+  height: 100vh;
+  border-radius: 12px;
+  overflow: hidden;
+  background-color: transparent;
 }
 
 input,

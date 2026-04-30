@@ -138,6 +138,7 @@ async fn connect_and_listen(
             if let tokio_tungstenite::tungstenite::Error::Http(ref resp) = e {
                 if resp.status() == 401 {
                     let body = String::from_utf8_lossy(resp.body().as_deref().unwrap_or(b""));
+                    error!("WS 401 body: {:?}", body);
                     let reason = if body.contains("device_revoked") {
                         crate::auth::Ws401Reason::DeviceRevoked
                     } else {
@@ -277,7 +278,7 @@ async fn handle_text_message(
 
                 info!(
                     "received clip: {} from {} ({} bytes)",
-                    clip.id, clip.source, clip.byte_size
+                    clip.clip_id, clip.source, clip.byte_size
                 );
 
                 // Check if this is a never-before-seen source
@@ -314,7 +315,7 @@ async fn handle_text_message(
                             .await
                             {
                                 error!("image auto-copy failed: {}", e);
-                                crate::events::ImageDownloadFailed(clip_clone.id.clone())
+                                crate::events::ImageDownloadFailed(clip_clone.clip_id.clone())
                                     .emit(&app_clone)
                                     .ok();
                             }
@@ -396,11 +397,13 @@ async fn handle_text_message(
         }
         ACTION_CLIP_DELETED => {
             if let Some(clip) = &msg.clip {
-                info!("clip deleted: {}", clip.id);
-                if let Err(e) = db.delete_clip(&clip.id) {
+                info!("clip deleted: {}", clip.clip_id);
+                if let Err(e) = db.delete_clip(&clip.clip_id) {
                     error!("db delete failed: {}", e);
                 }
-                crate::events::ClipDeleted(clip.id.clone()).emit(app).ok();
+                crate::events::ClipDeleted(clip.clip_id.clone())
+                    .emit(app)
+                    .ok();
             }
         }
         ACTION_REVOKED => {
@@ -436,8 +439,8 @@ async fn handle_text_message(
             // Persist new token.
             let user_id = extract_user_id(&current);
             match crate::auth::rotate_credentials(&user_id, device_id, token, &hostname) {
-                Ok(backend) => {
-                    log::info!("token_rotated persisted via {}", backend);
+                Ok(()) => {
+                    log::info!("token_rotated persisted");
                     // Re-read cfg for relay_url and emit Authenticated.
                     let mc = crate::protocol::MultiConfig::load();
                     if let Some(p) = mc.active_profile() {
@@ -657,7 +660,7 @@ async fn handle_image_auto_copy(
         Err(e) => return Err(format!("config load failed: {}", e)),
     };
 
-    let url = format!("{}/clips/{}/media", config.relay_url, clip.id);
+    let url = format!("{}/clips/{}/media", config.relay_url, clip.clip_id);
     let client = reqwest::Client::new();
     let resp = client
         .get(&url)
@@ -675,11 +678,13 @@ async fn handle_image_auto_copy(
         .await
         .map_err(|e| format!("reading media body: {}", e))?;
 
-    // Save to local media cache
+    // Save to local media cache — sanitize media_path to prevent path traversal
+    let safe_path = crate::sanitize_media_path(media_path)
+        .map_err(|e| format!("rejected unsafe media_path: {}", e))?;
     let media_dir = dirs::data_dir()
         .unwrap_or_else(|| dirs::home_dir().unwrap().join(".local/share"))
         .join("com.cinch.app");
-    let full_path = media_dir.join(media_path);
+    let full_path = media_dir.join(safe_path);
     if let Some(parent) = full_path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
@@ -688,7 +693,7 @@ async fn handle_image_auto_copy(
     // Pre-write change check: if clipboard changed during download, skip
     if clipboard.has_changed_since(pre_token) {
         info!("clipboard changed during image download, skipping auto-copy");
-        crate::events::ImageDownloadComplete(clip.id.clone())
+        crate::events::ImageDownloadComplete(clip.clip_id.clone())
             .emit(app)
             .ok();
         return Ok(());
@@ -699,7 +704,7 @@ async fn handle_image_auto_copy(
         return Err(format!("write_image failed: {}", e));
     }
 
-    crate::events::ImageDownloadComplete(clip.id.clone())
+    crate::events::ImageDownloadComplete(clip.clip_id.clone())
         .emit(app)
         .ok();
     info!("image auto-copied to clipboard: {} bytes", bytes.len());

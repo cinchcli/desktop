@@ -272,6 +272,12 @@ pub fn run() {
 
                             let relay =
                                 relay_url.unwrap_or_else(|| "https://api.cinchcli.com".to_string());
+
+                            if let Err(e) = crate::validate_relay_url(&relay) {
+                                log::warn!("deep-link: rejected invalid relay_url: {}", e);
+                                return;
+                            }
+
                             let hostname = std::env::var("HOSTNAME")
                                 .or_else(|_| std::env::var("COMPUTERNAME"))
                                 .unwrap_or_else(|_| "unknown".to_string());
@@ -287,7 +293,7 @@ pub fn run() {
                                     info.label.as_deref(),
                                     "",
                                 ) {
-                                    Ok((relay_id, _)) => {
+                                    Ok(relay_id) => {
                                         if let Ok(new_mc) = crate::auth::load_multi_config() {
                                             let mut g = dl_mc.lock().unwrap();
                                             *g = new_mc;
@@ -330,12 +336,7 @@ pub fn run() {
                                 },
                             );
 
-                            let ws_url = format!(
-                                "wss://{}/ws",
-                                relay
-                                    .trim_start_matches("https://")
-                                    .trim_start_matches("http://")
-                            );
+                            let ws_url = crate::protocol::ws_url_from_relay(&relay, &token);
                             let join_handle = ws::spawn_ws_client(
                                 &dl_app_handle,
                                 ws_url,
@@ -510,6 +511,35 @@ fn register_global_shortcuts(app: &tauri::AppHandle) {
             e
         );
     }
+}
+
+/// Validate that a relay URL uses http(s) and has a non-empty host.
+/// Prevents deep-link injection where relay_url points to attacker infrastructure.
+pub(crate) fn validate_relay_url(url: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(url).map_err(|_| format!("invalid relay URL: {}", url))?;
+    match parsed.scheme() {
+        "https" | "http" => {}
+        s => return Err(format!("relay URL scheme must be http(s), got: {}", s)),
+    }
+    if parsed.host().is_none() {
+        return Err("relay URL must have a host".into());
+    }
+    Ok(())
+}
+
+/// Sanitize a relay-provided media_path to prevent path traversal.
+/// Allows "media/filename.png" but rejects "../../../etc/passwd" and absolute paths.
+pub(crate) fn sanitize_media_path(media_path: &str) -> Result<std::path::PathBuf, String> {
+    let path = std::path::Path::new(media_path);
+    if path.is_absolute() {
+        return Err("media_path must be relative".into());
+    }
+    for component in path.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err("media_path contains path traversal".into());
+        }
+    }
+    Ok(path.to_path_buf())
 }
 
 async fn backfill_from_relay(db: &Arc<store::db::Database>, relay_url: &str, token: &str) {

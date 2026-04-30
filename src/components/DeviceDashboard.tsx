@@ -2,14 +2,22 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { commands } from "../bindings";
 import { unwrap } from "../lib/tauri";
 import { C, formatTime } from "../design";
-import type { DeviceInfo } from "../bindings";
+import type { Device, SourceInfo } from "../bindings";
 
 // ─── Props ────────────────────────────────────────────────
 
 interface DeviceDashboardProps {
   currentDeviceID: string;
   onShowToast: (message: string) => void;
+  onDeviceChange?: () => void;
 }
+
+// ─── Types ────────────────────────────────────────────────
+
+type MergedEntry =
+  | { kind: "device"; device: Device }
+  | { kind: "source_only"; source: SourceInfo }
+  | { kind: "local" };
 
 // ─── Helpers ──────────────────────────────────────────────
 
@@ -22,10 +30,15 @@ function deviceHue(deviceID: string): string {
   return `hsl(${hash % 360}, 55%, 58%)`;
 }
 
+function sourceName(source: string): string {
+  return source.replace(/^remote:/, "");
+}
+
 // ─── DeviceDashboard ──────────────────────────────────────
 
-export function DeviceDashboard({ currentDeviceID, onShowToast }: DeviceDashboardProps) {
-  const [devices, setDevices] = useState<DeviceInfo[]>([]);
+export function DeviceDashboard({ currentDeviceID, onShowToast, onDeviceChange }: DeviceDashboardProps) {
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [sources, setSources] = useState<SourceInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -35,34 +48,59 @@ export function DeviceDashboard({ currentDeviceID, onShowToast }: DeviceDashboar
   const nicknameErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Poll lifecycle (D-01, D-02, D-03) ──────────────────
+  // ── Poll lifecycle ──────────────────────────────────────
 
-  const fetchDevices = useCallback(async () => {
+  const fetchAll = useCallback(async () => {
     try {
-      const devs = await unwrap(commands.listDevices());
-      setDevices(devs);
+      const [devs, srcs] = await Promise.allSettled([
+        unwrap(commands.listDevices()),
+        unwrap(commands.getSources()),
+      ]);
+      if (devs.status === "fulfilled") setDevices(devs.value);
+      if (srcs.status === "fulfilled") setSources(srcs.value);
     } catch (e) {
-      console.error("list_devices failed:", e);
+      console.error("fetchAll failed:", e);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchDevices(); // immediate first fetch
-    const id = setInterval(fetchDevices, 5000); // 5s poll
-    return () => clearInterval(id); // cleanup stops poll on unmount
-  }, [fetchDevices]);
+    fetchAll();
+    const id = setInterval(fetchAll, 5000);
+    return () => clearInterval(id);
+  }, [fetchAll]);
 
-  // ── Nickname save (D-05) ────────────────────────────────
+  // ── Merge devices + sources ─────────────────────────────
+  // Produce a combined list: paired devices first, then source-only
+  // machines (sources without a matching device), then local.
+  const merged: MergedEntry[] = (() => {
+    const deviceSourceKeys = new Set(devices.map(d => d.source_key));
+    const entries: MergedEntry[] = devices.map(d => ({ kind: "device", device: d }));
+
+    for (const s of sources) {
+      if (s.source === "local") {
+        // current machine — add as local entry only if not already represented
+        if (!entries.some(e => e.kind === "local")) {
+          entries.push({ kind: "local" });
+        }
+      } else if (!deviceSourceKeys.has(s.source)) {
+        entries.push({ kind: "source_only", source: s });
+      }
+    }
+
+    return entries;
+  })();
+
+  // ── Nickname save ───────────────────────────────────────
 
   const saveNickname = async (deviceId: string, nickname: string) => {
     setSavingNickname(true);
     try {
       await unwrap(commands.setDeviceNickname(deviceId, nickname));
-      await fetchDevices();
+      await fetchAll();
+      onDeviceChange?.();
     } catch (_e) {
-      // Show inline error, auto-dismiss 3s
       setNicknameError("Save failed \u2014 try again");
       if (nicknameErrorTimer.current) clearTimeout(nicknameErrorTimer.current);
       nicknameErrorTimer.current = setTimeout(() => setNicknameError(null), 3000);
@@ -72,13 +110,14 @@ export function DeviceDashboard({ currentDeviceID, onShowToast }: DeviceDashboar
     }
   };
 
-  // ── Revoke (D-13 — POST /auth/device/revoke) ───────────
+  // ── Revoke ──────────────────────────────────────────────
 
   const revokeDevice = async (deviceId: string) => {
     try {
       await unwrap(commands.revokeDevice(deviceId));
       onShowToast("Device revoked");
-      await fetchDevices();
+      await fetchAll();
+      onDeviceChange?.();
     } catch (_e) {
       onShowToast("Failed to revoke device \u2014 try again");
     }
@@ -87,8 +126,8 @@ export function DeviceDashboard({ currentDeviceID, onShowToast }: DeviceDashboar
 
   // ── Nickname edit interaction ───────────────────────────
 
-  const startEdit = (device: DeviceInfo) => {
-    setEditingDeviceId(device.id);
+  const startEdit = (device: Device) => {
+    setEditingDeviceId(device.id ?? null);
     setEditValue(device.nickname || "");
     setNicknameError(null);
   };
@@ -108,7 +147,6 @@ export function DeviceDashboard({ currentDeviceID, onShowToast }: DeviceDashboar
     }
   };
 
-  // Auto-focus + select all when entering edit mode
   useEffect(() => {
     if (editingDeviceId && editInputRef.current) {
       editInputRef.current.focus();
@@ -116,7 +154,6 @@ export function DeviceDashboard({ currentDeviceID, onShowToast }: DeviceDashboar
     }
   }, [editingDeviceId]);
 
-  // Global Escape/Enter for revoke confirmation
   useEffect(() => {
     if (!confirmingRevokeId) return;
     const handler = (e: KeyboardEvent) => {
@@ -127,9 +164,7 @@ export function DeviceDashboard({ currentDeviceID, onShowToast }: DeviceDashboar
     return () => window.removeEventListener("keydown", handler);
   }, [confirmingRevokeId]);
 
-  // ── Last-seen parse (Pitfall 10 — formatTime expects unix) ──
-
-  const lastSeen = (device: DeviceInfo): string => {
+  const lastSeen = (device: Device): string => {
     return device.last_push_at
       ? formatTime(Math.floor(new Date(device.last_push_at).getTime() / 1000))
       : "never";
@@ -141,9 +176,9 @@ export function DeviceDashboard({ currentDeviceID, onShowToast }: DeviceDashboar
     return (
       <div style={S.panel}>
         <div style={S.header}>
-          <span style={S.headerTitle}>DEVICES</span>
+          <span style={S.headerTitle}>MACHINES</span>
         </div>
-        <div role="list" aria-label="Devices loading">
+        <div role="list" aria-label="Machines loading">
           {[0, 1, 2].map((i) => (
             <div key={i} role="listitem" style={S.skeletonRow}>
               <div style={{ ...S.skeletonBlock, width: 8, height: 8, borderRadius: "50%" }} />
@@ -159,15 +194,15 @@ export function DeviceDashboard({ currentDeviceID, onShowToast }: DeviceDashboar
 
   // ── Empty state ─────────────────────────────────────────
 
-  if (devices.length === 0) {
+  if (merged.length === 0) {
     return (
       <div style={S.panel}>
         <div style={S.header}>
-          <span style={S.headerTitle}>DEVICES</span>
-          <span style={S.headerCount}>0 paired</span>
+          <span style={S.headerTitle}>MACHINES</span>
+          <span style={S.headerCount}>0 machines</span>
         </div>
         <div style={S.emptyState}>
-          <div style={S.emptyHeading}>No paired devices</div>
+          <div style={S.emptyHeading}>No machines yet</div>
           <div style={S.emptyBody}>Pair a device to route clips between machines.</div>
           <code style={S.emptyCode}>cinch auth pair</code>
         </div>
@@ -175,47 +210,77 @@ export function DeviceDashboard({ currentDeviceID, onShowToast }: DeviceDashboar
     );
   }
 
-  // ── Device list ─────────────────────────────────────────
+  const pairedCount = devices.length;
+  const totalCount = merged.length;
+
+  // ── Machine list ─────────────────────────────────────────
 
   return (
     <div style={S.panel}>
       <div style={S.header}>
-        <span style={S.headerTitle}>DEVICES</span>
-        <span style={S.headerCount}>{devices.length} paired</span>
+        <span style={S.headerTitle}>MACHINES</span>
+        <span style={S.headerCount}>
+          {pairedCount} paired · {totalCount} total
+        </span>
       </div>
 
-      <div role="list" aria-label="Paired devices" style={S.listContainer}>
-        {devices.map((device) => {
+      <div role="list" aria-label="Machines" style={S.listContainer}>
+        {merged.map((entry) => {
+          if (entry.kind === "local") {
+            return (
+              <div key="local" role="listitem" style={S.deviceRow}>
+                <span style={{ ...S.dot, backgroundColor: C.t4 }} aria-hidden="true" />
+                <span style={{ ...S.dot, backgroundColor: C.success }} aria-label="Online" />
+                <div style={S.nameCol}>
+                  <span style={S.nickname}>This machine</span>
+                  <span style={S.hostname}>local clips</span>
+                </div>
+                <span style={S.lastSeen} />
+                <div style={S.actionCol}>
+                  <span style={S.thisDeviceBadge}>This device</span>
+                </div>
+              </div>
+            );
+          }
+
+          if (entry.kind === "source_only") {
+            const s = entry.source;
+            return (
+              <div key={s.source} role="listitem" style={S.deviceRow}>
+                <span style={{ ...S.dot, backgroundColor: C.t4 }} aria-hidden="true" />
+                <span style={{ ...S.dot, backgroundColor: C.t4 }} aria-label="Unknown status" />
+                <div style={S.nameCol}>
+                  <span style={S.nickname}>{sourceName(s.source)}</span>
+                  <span style={S.hostname}>{s.clip_count} clips</span>
+                </div>
+                <span style={S.lastSeen}>
+                  {formatTime(s.last_seen)}
+                </span>
+                <div style={S.actionCol}>
+                  <span style={{ ...S.thisDeviceBadge, color: C.t4 }}>Not paired</span>
+                </div>
+              </div>
+            );
+          }
+
+          // entry.kind === "device"
+          const device = entry.device;
           const isCurrentDevice = device.id === currentDeviceID;
           const isEditing = editingDeviceId === device.id;
           const isConfirmingRevoke = confirmingRevokeId === device.id;
           const displayName = device.nickname || device.hostname;
 
           return (
-            <div
-              key={device.id}
-              role="listitem"
-              style={S.deviceRow}
-            >
-              {/* ID dot — deterministic color */}
+            <div key={device.id} role="listitem" style={S.deviceRow}>
               <span
-                style={{
-                  ...S.dot,
-                  backgroundColor: deviceHue(device.id),
-                }}
+                style={{ ...S.dot, backgroundColor: deviceHue(device.id ?? "") }}
                 aria-hidden="true"
               />
-
-              {/* Online/offline dot */}
               <span
-                style={{
-                  ...S.dot,
-                  backgroundColor: device.online ? C.success : C.t4,
-                }}
+                style={{ ...S.dot, backgroundColor: device.online ? C.success : C.t4 }}
                 aria-label={device.online ? "Online" : "Offline"}
               />
 
-              {/* Name + hostname sub-label */}
               <div style={S.nameCol}>
                 {isEditing ? (
                   <input
@@ -227,16 +292,10 @@ export function DeviceDashboard({ currentDeviceID, onShowToast }: DeviceDashboar
                     }}
                     value={editValue}
                     onChange={(e) => setEditValue(e.target.value)}
-                    onBlur={() => commitEdit(device.id)}
+                    onBlur={() => commitEdit(device.id ?? "")}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        commitEdit(device.id);
-                      }
-                      if (e.key === "Escape") {
-                        e.preventDefault();
-                        cancelEdit();
-                      }
+                      if (e.key === "Enter") { e.preventDefault(); commitEdit(device.id ?? ""); }
+                      if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
                     }}
                     maxLength={32}
                     spellCheck={false}
@@ -257,37 +316,27 @@ export function DeviceDashboard({ currentDeviceID, onShowToast }: DeviceDashboar
                 <span style={S.hostname}>@{device.hostname}</span>
               </div>
 
-              {/* Last seen */}
-              <span style={S.lastSeen}>
-                {lastSeen(device)}
-              </span>
+              <span style={S.lastSeen}>{lastSeen(device)}</span>
 
-              {/* Right: This device badge OR Revoke button */}
               <div style={S.actionCol}>
-                {isCurrentDevice ? (
-                  <span style={S.thisDeviceBadge}>This device</span>
-                ) : isConfirmingRevoke ? (
+                {isConfirmingRevoke ? (
                   <div style={S.revokeConfirm}>
-                    <button
-                      style={S.keepBtn}
-                      onClick={() => setConfirmingRevokeId(null)}
-                    >
-                      Keep Device
+                    <button style={S.keepBtn} onClick={() => setConfirmingRevokeId(null)}>
+                      Keep
                     </button>
-                    <button
-                      style={S.revokeConfirmBtn}
-                      onClick={() => revokeDevice(device.id)}
-                    >
+                    <button style={S.revokeConfirmBtn} onClick={() => revokeDevice(device.id ?? "")}>
                       Revoke &ldquo;{displayName}&rdquo;
                     </button>
                   </div>
                 ) : (
-                  <button
-                    style={S.revokeBtn}
-                    onClick={() => setConfirmingRevokeId(device.id)}
-                  >
-                    Revoke
-                  </button>
+                  <>
+                    {isCurrentDevice && (
+                      <span style={S.thisDeviceBadge}>This device</span>
+                    )}
+                    <button style={S.revokeBtn} onClick={() => setConfirmingRevokeId(device.id ?? null)}>
+                      Revoke
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -479,7 +528,6 @@ const S: Record<string, React.CSSProperties> = {
     whiteSpace: "nowrap",
   },
 
-  // Empty state
   emptyState: {
     padding: "40px 20px",
     textAlign: "center",
@@ -505,7 +553,6 @@ const S: Record<string, React.CSSProperties> = {
     color: C.t3,
   },
 
-  // Loading skeleton
   skeletonRow: {
     display: "flex",
     alignItems: "center",

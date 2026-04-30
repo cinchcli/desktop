@@ -264,10 +264,12 @@ pub fn copy_image_to_clipboard(
     clipboard: State<'_, Arc<ClipboardService>>,
     media_path: String,
 ) -> Result<(), String> {
+    let safe_path = crate::sanitize_media_path(&media_path)
+        .map_err(|e| format!("invalid media_path: {}", e))?;
     let base_dir = dirs::data_dir()
         .unwrap_or_else(|| dirs::home_dir().unwrap().join(".local/share"))
         .join("com.cinch.app");
-    let full_path = base_dir.join(&media_path);
+    let full_path = base_dir.join(safe_path);
     if !full_path.exists() {
         return Err(format!("media file not found: {}", media_path));
     }
@@ -329,7 +331,7 @@ pub fn save_config(app: tauri::AppHandle, relay_url: String, token: String) -> R
         existing.active_device_id
     };
 
-    let backend = crate::auth::credential::write_credentials(
+    crate::auth::credential::write_credentials(
         &user_id,
         &device_id,
         token.trim(),
@@ -338,7 +340,7 @@ pub fn save_config(app: tauri::AppHandle, relay_url: String, token: String) -> R
     )
     .map_err(|e| format!("write_credentials: {}", e))?;
 
-    log::info!("save_config succeeded via {} backend", backend);
+    log::info!("save_config succeeded");
 
     // Keep app.restart() for Phase 2 — SetupScreen full reload is the existing UX.
     // Phase 3 (T1-02) will remove the restart as part of the LocalOnly-first-class rework.
@@ -350,10 +352,13 @@ fn resolve_active_creds(mc: &State<'_, MultiConfigHandle>) -> Result<(String, St
     let profile = guard.active_profile().ok_or("no active relay configured")?;
     let token = if profile.token.is_empty() {
         let cfg = profile.to_config();
-        crate::auth::read_credentials(&cfg).unwrap_or_default()
+        crate::auth::read_credentials(&cfg).map_err(|_| "not authenticated".to_string())?
     } else {
         profile.token.clone()
     };
+    if token.is_empty() {
+        return Err("not authenticated".to_string());
+    }
     Ok((profile.relay_url.clone(), token))
 }
 

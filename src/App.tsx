@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { commands, events } from "./bindings";
-import type { LocalClip, SourceInfo, DeviceInfo } from "./bindings";
+import type { LocalClip, SourceInfo, Device } from "./bindings";
 import { unwrap } from "./lib/tauri";
 import { C, formatTime, formatBytes } from "./design";
 import { useAuthState, retryAuth, type AuthProgress, type AuthErrorReason } from "./state/auth";
@@ -14,12 +15,12 @@ import {
   IconMoon,
   IconGear,
   IconAutoCopy,
+  IconPin,
   typeGlyph,
 } from "./icons";
 import SettingsPane from "./SettingsPane";
 import { LocalOnlyView } from "./components/LocalOnlyView";
 import { SourcePill } from "./components/SourcePill";
-import { OfflineBar } from "./components/OfflineBar";
 import { DeviceDashboard } from "./components/DeviceDashboard";
 import "./App.css";
 
@@ -66,10 +67,17 @@ function useTheme(): { theme: Theme; toggle: () => void } {
 }
 
 
+function handleWindowDrag(e: React.MouseEvent) {
+  const target = e.target as HTMLElement;
+  if (!target.closest("button, input, a, textarea")) {
+    getCurrentWindow().startDragging();
+  }
+}
+
 function App() {
   const { theme, toggle: toggleTheme } = useTheme();
   const auth = useAuthState();
-  const [status, setStatus] = useState("connecting");
+  const [_status, setStatus] = useState("connecting");
   const [clips, setClips] = useState<LocalClip[]>([]);
   const [sources, setSources] = useState<SourceInfo[]>([]);
   const [selectedClip, setSelectedClip] = useState<LocalClip | null>(null);
@@ -77,11 +85,12 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [sourceSettings, setSourceSettings] = useState<Record<string, boolean>>({});
-  const [devices, setDevices] = useState<DeviceInfo[]>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
   const [newSourcePrompt, setNewSourcePrompt] = useState<string | null>(null);
+  const [pinNoteDialog, setPinNoteDialog] = useState<{ clip: LocalClip } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const [activePanel, setActivePanel] = useState<"clips" | "devices">("clips");
+  const [activePanel, setActivePanel] = useState<"clips" | "machines">("clips");
   const searchRef = useRef<HTMLInputElement>(null);
   const clipListRef = useRef<HTMLDivElement>(null);
   const [toast, setToast] = useState<{ message: string; icon: "copy" | "trash" } | null>(null);
@@ -100,6 +109,18 @@ function App() {
 
   const refreshClips = useCallback(async () => {
     try {
+      if (selectedSource === "__pinned__") {
+        const pinned = await unwrap(commands.listPinnedClips());
+        const filtered = debouncedQuery.trim()
+          ? pinned.filter(
+              (c) =>
+                c.content.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
+                c.pin_note?.toLowerCase().includes(debouncedQuery.toLowerCase()),
+            )
+          : pinned;
+        setClips(filtered);
+        return;
+      }
       if (debouncedQuery.trim()) {
         const results = await unwrap(commands.searchClips(debouncedQuery, 100));
         const filtered = selectedSource
@@ -155,6 +176,7 @@ function App() {
   };
 
   useEffect(() => {
+    if (auth.variant !== "Authenticated") return;
     const timer = setTimeout(() => {
       refreshClips();
       refreshSources();
@@ -162,7 +184,7 @@ function App() {
       refreshDevices();
     }, 1000);
     return () => clearTimeout(timer);
-  }, []);
+  }, [auth.variant, refreshClips, refreshSources, refreshSourceSettings, refreshDevices]);
 
   useEffect(() => { refreshClips(); }, [refreshClips]);
 
@@ -205,6 +227,19 @@ function App() {
     showToast("Deleted", "trash");
   };
 
+  const handlePin = async (clip: LocalClip, note: string | null) => {
+    await unwrap(commands.pinClip(clip.id, note));
+    setPinNoteDialog(null);
+    refreshClips();
+    showToast("Pinned", "copy");
+  };
+
+  const handleUnpin = async (clip: LocalClip) => {
+    await unwrap(commands.unpinClip(clip.id));
+    refreshClips();
+    showToast("Unpinned", "trash");
+  };
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "f") {
@@ -227,6 +262,11 @@ function App() {
         setShowShortcuts(v => !v);
         return;
       }
+      if ((e.metaKey || e.ctrlKey) && e.key === ",") {
+        e.preventDefault();
+        setShowSettings(v => !v);
+        return;
+      }
       if (selectedClip) {
         if (e.key === "Enter" && !(e.target instanceof HTMLInputElement)) {
           e.preventDefault();
@@ -238,6 +278,14 @@ function App() {
         }
         if ((e.metaKey || e.ctrlKey) && e.key === "c") {
           if (!window.getSelection()?.toString()) copyClip(selectedClip);
+        }
+        if ((e.metaKey || e.ctrlKey) && e.key === "p" && !(e.target instanceof HTMLInputElement)) {
+          e.preventDefault();
+          if (selectedClip.is_pinned) {
+            handleUnpin(selectedClip);
+          } else {
+            setPinNoteDialog({ clip: selectedClip });
+          }
         }
       }
       // Ctrl+H / Ctrl+L — cycle sources (only when not typing in search)
@@ -268,12 +316,6 @@ function App() {
   }, [searchQuery, selectedClip, clips, sources, selectedSource, copyClip, showShortcuts]);
 
   const totalClips = sources.reduce((sum, s) => sum + s.clip_count, 0);
-  const statusColor =
-    status === "connected"
-      ? C.success
-      : status === "connecting"
-        ? C.warning
-        : C.error;
 
   // from: token parsing for device-scoped clip filtering (T3-04)
   const fromMatch = searchQuery.match(/from:(\S+)/i);
@@ -282,7 +324,7 @@ function App() {
     if (!sourceFilterToken) return false;
     const nick = sourceFilterToken.toLowerCase();
     return !devices.some(
-      d => (d.nickname?.toLowerCase() === nick) || (d.hostname.toLowerCase() === nick)
+      d => (d.nickname?.toLowerCase() === nick) || (d.hostname?.toLowerCase() === nick)
     );
   }, [sourceFilterToken, devices]);
 
@@ -290,7 +332,7 @@ function App() {
     if (!sourceFilterToken) return null;
     const nick = sourceFilterToken.toLowerCase();
     const matched = devices.find(
-      d => (d.nickname?.toLowerCase() === nick) || (d.hostname.toLowerCase() === nick)
+      d => (d.nickname?.toLowerCase() === nick) || (d.hostname?.toLowerCase() === nick)
     );
     return matched ? matched.source_key : "__no_match__";
   }, [sourceFilterToken, devices]);
@@ -302,14 +344,16 @@ function App() {
     return clips.filter(c => c.source === sourceFilter);
   }, [clips, sourceFilter]);
 
-  const deviceBySource: Record<string, DeviceInfo> = {};
-  for (const d of devices) deviceBySource[d.source_key] = d;
+  const deviceBySource: Record<string, Device> = {};
+  for (const d of devices) {
+    if (d.source_key) deviceBySource[d.source_key] = d;
+  }
 
   // Build source -> nickname map for SourcePill and from: filter
   const nicknameBySource = useMemo(() => {
     const map: Record<string, string> = {};
     for (const d of devices) {
-      if (d.nickname) {
+      if (d.nickname && d.source_key) {
         map[d.source_key] = d.nickname;
       }
     }
@@ -321,7 +365,7 @@ function App() {
 
   // Settings overlay — lifted above auth checks so it works in all auth states
   const settingsOverlay = showSettings ? (
-    <SettingsPane onClose={() => setShowSettings(false)} clipCount={totalClips} />
+    <SettingsPane onClose={() => { setShowSettings(false); if (auth.variant === "Authenticated") refreshDevices(); }} clipCount={totalClips} />
   ) : null;
 
   if (auth.variant === "LocalOnly") {
@@ -352,7 +396,7 @@ function App() {
   return (
     <main data-testid="dashboard-root" style={S.main}>
       {/* Top: search bar with logo mark ──────────────────── */}
-      <div style={S.searchBar}>
+      <div style={S.searchBar} onMouseDown={handleWindowDrag}>
         <span style={S.searchIcon}><IconSearch size={14} /></span>
         <input
           ref={searchRef}
@@ -393,17 +437,46 @@ function App() {
 
 
 
-      {/* Offline status bar */}
-      <OfflineBar visible={status === "disconnected" && auth.variant === "Authenticated"} />
-
       {/* Main content: rail · list · detail ───────────────── */}
       <div style={S.content}>
         <nav style={S.rail} aria-label="Sources">
           <RailItem
-            label="All sources"
-            active={selectedSource === null}
-            onClick={() => setSelectedSource(null)}
+            label="All clips"
+            active={selectedSource === null && activePanel === "clips"}
+            onClick={() => { setActivePanel("clips"); setSelectedSource(null); }}
           />
+          <RailItem
+            label="Pinned"
+            active={selectedSource === "__pinned__" && activePanel === "clips"}
+            pinned
+            onClick={() => {
+              setActivePanel("clips");
+              setSelectedSource(selectedSource === "__pinned__" ? null : "__pinned__");
+              setSelectedClip(null);
+            }}
+          />
+          <div style={{ borderBottom: `1px solid ${C.border}`, margin: "4px 6px" }} />
+
+          {/* Machines tab */}
+          <div
+            style={{
+              ...S.railItem,
+              ...(activePanel === "machines" ? S.railItemActive : {}),
+              cursor: "pointer",
+            }}
+            onClick={() => setActivePanel(activePanel === "machines" ? "clips" : "machines")}
+            aria-current={activePanel === "machines" ? "page" : undefined}
+          >
+            <span style={{ width: 6, height: 6 }} />
+            <span style={S.railLabel}>Machines</span>
+            {devices.length > 0 && (
+              <span style={{ fontSize: 12, fontFamily: "var(--font-mono, 'JetBrains Mono', monospace)", color: C.t3 }}>
+                {devices.filter(d => d.online).length}/{devices.length}
+              </span>
+            )}
+          </div>
+          <div style={{ borderBottom: `1px solid ${C.border}`, margin: "4px 6px" }} />
+
           {sources.map((s) => {
             const d = deviceBySource[s.source];
             const name = d?.nickname || s.source.replace("remote:", "");
@@ -425,32 +498,13 @@ function App() {
               />
             );
           })}
-
-          {/* Devices nav entry */}
-          <div style={{ borderTop: `1px solid ${C.border}`, margin: "4px 0" }} />
-          <div
-            style={{
-              ...S.railItem,
-              ...(activePanel === "devices" ? S.railItemActive : {}),
-              cursor: "pointer",
-            }}
-            onClick={() => setActivePanel(activePanel === "devices" ? "clips" : "devices")}
-            aria-current={activePanel === "devices" ? "page" : undefined}
-          >
-            <span style={{ width: 6, height: 6 }} />
-            <span style={S.railLabel}>Devices</span>
-            {devices.length > 0 && (
-              <span style={{ fontSize: 12, fontFamily: "var(--font-mono, 'JetBrains Mono', monospace)", color: C.t3 }}>
-                {devices.filter(d => d.online).length}/{devices.length}
-              </span>
-            )}
-          </div>
         </nav>
 
-        {activePanel === "devices" ? (
+        {activePanel === "machines" ? (
           <DeviceDashboard
             currentDeviceID={currentDeviceID}
             onShowToast={(msg) => showToast(msg, "copy")}
+            onDeviceChange={refreshDevices}
           />
         ) : (
           <>
@@ -477,6 +531,8 @@ function App() {
                     onClick={() => setSelectedClip(clip)}
                     onDoubleClick={() => { setSelectedClip(clip); copyClip(clip); }}
                     nickname={nicknameBySource[clip.source]}
+                    onPin={() => setPinNoteDialog({ clip })}
+                    onUnpin={() => handleUnpin(clip)}
                   />
                 ))
               )}
@@ -494,11 +550,8 @@ function App() {
       </div>
 
       {/* Bottom status bar (Raycast-style) ────────────────── */}
-      <footer style={S.statusBar} role="contentinfo">
+      <footer style={S.statusBar} role="contentinfo" onMouseDown={handleWindowDrag}>
         <div style={S.statusLeft}>
-          <span style={{ ...S.dot, background: statusColor }} aria-hidden="true" />
-          <span style={S.statusText}>{status}</span>
-          <span style={S.statusSep}>·</span>
           <span style={S.statusText}>
             {totalClips} {totalClips === 1 ? "clip" : "clips"}
           </span>
@@ -534,6 +587,15 @@ function App() {
         <HiddenActions
           onCopy={() => copyClip(selectedClip)}
           onDelete={() => handleDelete(selectedClip.id)}
+        />
+      )}
+
+      {/* Pin note dialog */}
+      {pinNoteDialog && (
+        <PinNoteDialog
+          clip={pinNoteDialog.clip}
+          onConfirm={(note) => handlePin(pinNoteDialog.clip, note || null)}
+          onCancel={() => setPinNoteDialog(null)}
         />
       )}
 
@@ -756,12 +818,13 @@ function AuthErrorScreen({
 // ─── Subcomponents ─────────────────────────────────────────
 
 function RailItem({
-  label, active, online, autoCopy, onToggleAutoCopy, onClick,
+  label, active, online, autoCopy, pinned, onToggleAutoCopy, onClick,
 }: {
   label: string;
   active: boolean;
   online?: boolean;
   autoCopy?: boolean;
+  pinned?: boolean;
   onToggleAutoCopy?: (e: React.MouseEvent) => void;
   onClick: () => void;
 }) {
@@ -778,7 +841,11 @@ function RailItem({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
-      {online !== undefined ? (
+      {pinned ? (
+        <span style={{ display: "flex", alignItems: "center", color: active ? C.accent : C.t3 }}>
+          <IconPin size={10} />
+        </span>
+      ) : online !== undefined ? (
         <span style={{ ...S.dot, background: dotColor, width: 6, height: 6 }} />
       ) : (
         <span style={{ width: 6, height: 6 }} />
@@ -802,14 +869,17 @@ function RailItem({
 }
 
 function ClipRow({
-  clip, selected, onClick, onDoubleClick, nickname,
+  clip, selected, onClick, onDoubleClick, nickname, onPin, onUnpin,
 }: {
   clip: LocalClip;
   selected: boolean;
   onClick: () => void;
   onDoubleClick?: () => void;
   nickname?: string;
+  onPin: () => void;
+  onUnpin: () => void;
 }) {
+  const [hover, setHover] = useState(false);
   const isImage = clip.content_type === "image" && !!clip.media_path;
   const preview = clip.content.replace(/\s+/g, " ").trim().substring(0, 140);
   return (
@@ -820,6 +890,8 @@ function ClipRow({
       style={{ ...S.row, ...(selected ? S.rowActive : {}) }}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
     >
       <div style={S.rowGlyph}>
         {isImage ? (
@@ -845,8 +917,30 @@ function ClipRow({
           />
           <span style={S.metaDot}>·</span>
           <span>{formatTime(clip.created_at)}</span>
+          {clip.pin_note && (
+            <>
+              <span style={S.metaDot}>·</span>
+              <span style={{ color: C.accent, maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {clip.pin_note}
+              </span>
+            </>
+          )}
         </div>
       </div>
+      {(hover || clip.is_pinned) && (
+        <button
+          title={clip.is_pinned ? "Unpin" : "Pin clip"}
+          aria-label={clip.is_pinned ? "Unpin" : "Pin clip"}
+          style={{
+            ...S.rowAction,
+            color: clip.is_pinned ? C.accent : C.t3,
+            opacity: hover || clip.is_pinned ? 1 : 0,
+          }}
+          onClick={(e) => { e.stopPropagation(); clip.is_pinned ? onUnpin() : onPin(); }}
+        >
+          <IconPin size={12} />
+        </button>
+      )}
     </div>
   );
 }
@@ -873,36 +967,41 @@ function ClipDetail({ clip }: { clip: LocalClip }) {
       </div>
 
       <div style={S.detailContent}>
-        {isImage ? (
-          <div style={S.imgFrame}>
-            <img
-              src={`cinch://media/${clip.id}`}
-              alt={`Clipboard image from ${clip.source}`}
-              style={S.img}
-              onError={(e) => {
-                const el = e.target as HTMLImageElement;
-                const parent = el.parentElement;
-                if (parent) {
-                  el.style.display = "none";
-                  parent.appendChild(
-                    Object.assign(document.createElement("div"), {
-                      style: "color:#5A5A63;font-size:12px",
-                      textContent: "Image unavailable",
-                    }),
-                  );
-                }
-              }}
-            />
-          </div>
-        ) : (
-          <pre style={S.codeBlock}>{body}</pre>
-        )}
+        <div style={S.detailContentBody}>
+          {isImage ? (
+            <div style={S.imgFrame}>
+              <img
+                src={`cinch://media/${clip.id}`}
+                alt={`Clipboard image from ${clip.source}`}
+                style={S.img}
+                onError={(e) => {
+                  const el = e.target as HTMLImageElement;
+                  const parent = el.parentElement;
+                  if (parent) {
+                    el.style.display = "none";
+                    parent.appendChild(
+                      Object.assign(document.createElement("div"), {
+                        style: "color:#5A5A63;font-size:12px",
+                        textContent: "Image unavailable",
+                      }),
+                    );
+                  }
+                }}
+              />
+            </div>
+          ) : (
+            <pre style={S.codeBlock}>{body}</pre>
+          )}
+        </div>
 
         <dl style={S.metaList}>
           <MetaRow label="source" value={clip.source.startsWith("remote:") ? clip.source.replace("remote:", "") : clip.source} />
           <MetaRow label="type" value={clip.content_type} />
           <MetaRow label="size" value={formatBytes(clip.byte_size)} />
           <MetaRow label="ttl" value={clip.ttl > 0 ? `${clip.ttl}s` : "permanent"} />
+          {clip.is_pinned && (
+            <MetaRow label="note" value={clip.pin_note ?? "(no note)"} />
+          )}
         </dl>
       </div>
     </>
@@ -953,6 +1052,7 @@ function ShortcutPanel({ onClose }: { onClose: () => void }) {
         { keys: ["↵"], label: "Copy selected clip" },
         { keys: ["⌘C"], label: "Copy selected clip" },
         { keys: ["⌘⌫"], label: "Delete selected clip" },
+        { keys: ["⌘P"], label: "Pin / unpin selected clip" },
       ],
     },
     {
@@ -966,6 +1066,7 @@ function ShortcutPanel({ onClose }: { onClose: () => void }) {
       title: "General",
       rows: [
         { keys: ["?"], label: "Toggle this panel" },
+        { keys: ["⌘,"], label: "Open settings" },
       ],
     },
   ];
@@ -997,6 +1098,59 @@ function ShortcutPanel({ onClose }: { onClose: () => void }) {
               </div>
             </div>
           ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PinNoteDialog({
+  clip,
+  onConfirm,
+  onCancel,
+}: {
+  clip: LocalClip;
+  onConfirm: (note: string) => void;
+  onCancel: () => void;
+}) {
+  const [note, setNote] = useState(clip.pin_note ?? "");
+  const preview = clip.content.replace(/\s+/g, " ").trim().substring(0, 60);
+
+  return (
+    <div style={S.overlay} onClick={onCancel}>
+      <div style={{ ...S.dialog, maxWidth: 360 }} onClick={(e) => e.stopPropagation()}>
+        <div style={S.dialogTitle}>Pin clip</div>
+        <div style={{ fontSize: 11, color: C.t3, marginBottom: 10, fontFamily: "'JetBrains Mono', monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {preview || "(image)"}
+        </div>
+        <textarea
+          autoFocus
+          placeholder="Add a note (optional)"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onConfirm(note); }
+            if (e.key === "Escape") onCancel();
+          }}
+          style={{
+            width: "100%",
+            minHeight: 60,
+            background: C.card2,
+            border: `1px solid ${C.border}`,
+            borderRadius: 4,
+            color: C.t1,
+            fontSize: 12,
+            fontFamily: "inherit",
+            padding: "6px 8px",
+            resize: "none",
+            outline: "none",
+            boxSizing: "border-box",
+            marginBottom: 12,
+          }}
+        />
+        <div style={S.dialogActions}>
+          <button style={S.btnGhost} onClick={onCancel}>Cancel</button>
+          <button style={S.btnPrimary} onClick={() => onConfirm(note)}>Pin</button>
         </div>
       </div>
     </div>
@@ -1038,6 +1192,9 @@ const S: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     position: "relative",
+    borderRadius: 12,
+    overflow: "hidden",
+    border: `1px solid ${C.border}`,
   },
 
   // Search bar (top)
@@ -1176,6 +1333,17 @@ const S: Record<string, React.CSSProperties> = {
     borderRadius: 3,
     background: C.card2,
   },
+  rowAction: {
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+    padding: "2px 4px",
+    display: "flex",
+    alignItems: "center",
+    borderRadius: 3,
+    flexShrink: 0,
+    transition: "color 100ms ease",
+  },
   rowPreview: {
     fontSize: 13,
     color: C.t1,
@@ -1231,6 +1399,12 @@ const S: Record<string, React.CSSProperties> = {
     flex: 1,
     overflowY: "auto",
     padding: "16px 18px 20px",
+    display: "flex",
+    flexDirection: "column",
+  },
+  detailContentBody: {
+    flex: 1,
+    marginBottom: 16,
   },
   codeBlock: {
     background: C.card,
@@ -1272,10 +1446,10 @@ const S: Record<string, React.CSSProperties> = {
 
   // Metadata list
   metaList: {
-    marginTop: 20,
     margin: 0,
-    paddingTop: 20,
+    paddingTop: 16,
     borderTop: `1px solid ${C.border}`,
+    flexShrink: 0,
   },
   metaRow: {
     display: "flex",
