@@ -9,13 +9,40 @@ on:
 jobs:
   validate:
     runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: desktop
     steps:
-      - uses: actions/checkout@v4
+      # Sibling-checkout invariant: src-tauri/Cargo.toml has a path dep on
+      # ../../cinch/crates/client-core, and proto-cinch's build.rs reads
+      # ../../../relay/proto. CI must mirror the developer's local layout.
+      # TODO: switch the cinch/relay refs to `main` once the proto-source-of-truth
+      # PR triple has merged. For now they must point at the matching feature
+      # branches because main doesn't yet have the proto-cinch crate.
+      - name: Checkout desktop
+        uses: actions/checkout@v4
+        with:
+          path: desktop
+
+      - name: Checkout cinch sibling
+        uses: actions/checkout@v4
+        with:
+          repository: cinchcli/cinch
+          ref: proto-source-of-truth
+          path: cinch
+
+      - name: Checkout relay sibling (needed for proto-cinch's build.rs)
+        uses: actions/checkout@v4
+        with:
+          repository: cinchcli/relay
+          ref: proto-source-of-truth
+          path: relay
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: 'npm'
+          cache-dependency-path: desktop/package-lock.json
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -25,7 +52,7 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: desktop/src-tauri
 
       - name: Install dependencies
         run: npm ci
