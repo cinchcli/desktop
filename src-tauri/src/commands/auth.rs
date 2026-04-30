@@ -194,6 +194,14 @@ pub fn sign_in(
                 continue;
             }
 
+            log::info!(
+                "sign_in: poll complete — token_prefix={}, token_len={}, user_id={}, device_id={}",
+                &token.chars().take(8).collect::<String>(),
+                token.len(),
+                user_id,
+                device_id,
+            );
+
             // Write credentials to disk / keychain.
             if let Err(e) =
                 crate::auth::write_credentials(&user_id, &device_id, &token, &relay2, &hostname2)
@@ -228,12 +236,7 @@ pub fn sign_in(
                 },
             );
 
-            let ws_url = format!(
-                "wss://{}/ws",
-                relay2
-                    .trim_start_matches("https://")
-                    .trim_start_matches("http://")
-            );
+            let ws_url = crate::protocol::ws_url_from_relay(&relay2, &token);
             let jh = crate::ws::spawn_ws_client(
                 &app2,
                 ws_url,
@@ -307,6 +310,9 @@ pub async fn handle_deeplink(
         return Err("invalid token format".into());
     }
 
+    // Validate relay_url scheme and host (prevents deep-link relay hijack)
+    crate::validate_relay_url(&relay_url).map_err(|e| format!("invalid relay_url: {}", e))?;
+
     let hostname = std::env::var("HOSTNAME")
         .or_else(|_| std::env::var("COMPUTERNAME"))
         .unwrap_or_else(|_| "unknown".to_string());
@@ -315,7 +321,7 @@ pub async fn handle_deeplink(
     let pending_info = pending.take();
     let active_relay_id = if let Some(info) = pending_info {
         // Add new relay profile
-        let (relay_id, _) = add_relay_profile(
+        let relay_id = add_relay_profile(
             &user_id,
             &device_id,
             &token,
@@ -389,12 +395,7 @@ pub async fn handle_deeplink(
     }
 
     // Spawn WS client
-    let ws_url = format!(
-        "wss://{}/ws",
-        relay_url
-            .trim_start_matches("https://")
-            .trim_start_matches("http://")
-    );
+    let ws_url = crate::protocol::ws_url_from_relay(&relay_url, &token);
     let db: State<'_, Arc<crate::store::db::Database>> = app.state();
     let clipboard: State<'_, Arc<crate::clipboard::ClipboardService>> = app.state();
     let ws_status: State<'_, Arc<WsStatus>> = app.state();

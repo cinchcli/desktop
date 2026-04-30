@@ -135,6 +135,12 @@ export const IconClipboard = ({ size = 14, style }: IconProps) => (
   </svg>
 );
 
+export const IconPin = ({ size = 14, style }: IconProps) => (
+  <svg {...base(size)} style={style}>
+    <path d="M12 2l2.4 6H20l-5 3.6 1.9 6L12 14l-4.9 3.6L9 11.6 4 8h5.6L12 2z" />
+  </svg>
+);
+
 export const IconAutoCopy = ({ size = 14, style }: IconProps) => (
   <svg {...base(size)} style={style}>
     <rect x="8" y="2" width="8" height="4" rx="1" />

@@ -132,18 +132,6 @@ pub(crate) fn next_state_from_config(cfg: &crate::protocol::Config) -> AuthState
             relay_url: cfg.relay_url.clone(),
             active_relay_id: active_relay_id.clone(),
         },
-        // Plaintext-fallback intent: Config has identity fields but keyring reports unavailable;
-        // still treat as Authenticated so the app uses cfg.token (populated by the plaintext path).
-        Err(CredentialError::KeyringUnavailable(_)) if !cfg.token.is_empty() => {
-            AuthState::Authenticated {
-                user_id: cfg.user_id.clone(),
-                device_id: cfg.active_device_id.clone(),
-                hostname: cfg.hostname.clone(),
-                relay_url: cfg.relay_url.clone(),
-                active_relay_id,
-            }
-        }
-        // NoEntry or any other error → credentials are gone, flip to LocalOnly.
         Err(_) => AuthState::LocalOnly,
     }
 }

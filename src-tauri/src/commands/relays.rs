@@ -145,7 +145,7 @@ pub async fn pair_with_token(
         guard.save().map_err(|e| format!("clear relays: {}", e))?;
     }
 
-    let (relay_id, _backend) = add_relay_profile(
+    let relay_id = add_relay_profile(
         &pair_resp.user_id,
         &pair_resp.device_id,
         &pair_resp.token,

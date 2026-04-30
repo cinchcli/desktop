@@ -19,7 +19,7 @@ export const commands = {
 	getAllSourceSettings: () => typedError<SourceSetting[], string>(__TAURI_INVOKE("get_all_source_settings")),
 	copyClipToClipboard: (content: string) => typedError<null, string>(__TAURI_INVOKE("copy_clip_to_clipboard", { content })),
 	copyImageToClipboard: (mediaPath: string) => typedError<null, string>(__TAURI_INVOKE("copy_image_to_clipboard", { mediaPath })),
-	listDevices: () => typedError<DeviceInfo[], string>(__TAURI_INVOKE("list_devices")),
+	listDevices: () => typedError<Device[], string>(__TAURI_INVOKE("list_devices")),
 	setDeviceNickname: (deviceId: string, nickname: string) => typedError<null, string>(__TAURI_INVOKE("set_device_nickname", { deviceId, nickname })),
 	revokeDevice: (deviceId: string) => typedError<null, string>(__TAURI_INVOKE("revoke_device", { deviceId })),
 	getExcludedApps: () => typedError<string[], string>(__TAURI_INVOKE("get_excluded_apps")),
@@ -130,15 +130,17 @@ export type ConfigInfo = {
 	hostname: string,
 };
 
-export type DeviceInfo = {
-	id: string,
-	hostname: string,
-	source_key: string,
-	clip_count: number,
-	paired_at: string,
-	last_push_at: string | null,
-	online: boolean,
-	nickname?: string | null,
+export type Device = {
+	id?: string,
+	hostname?: string,
+	source_key?: string,
+	clip_count?: number,
+	paired_at?: string,
+	last_push_at?: string | null,
+	online?: boolean,
+	nickname?: string,
+	public_key?: string,
+	public_key_fingerprint?: string,
 };
 
 export type ImageDownloadComplete = string;
