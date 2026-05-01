@@ -541,7 +541,7 @@ function AuthLoadingScreen({ progress }: { progress: AuthProgress }) {
             width: 20,
             height: 20,
             borderRadius: '50%',
-            backgroundColor: C.accent,
+            backgroundColor: C.t1,
           }}
         />
       ) : (
@@ -550,9 +550,9 @@ function AuthLoadingScreen({ progress }: { progress: AuthProgress }) {
             width: 20,
             height: 20,
             border: '2px solid transparent',
-            borderTopColor: C.accent,
-            borderRightColor: C.accent,
-            borderBottomColor: C.accent,
+            borderTopColor: C.t1,
+            borderRightColor: C.t1,
+            borderBottomColor: C.t1,
             borderRadius: '50%',
             animation: 'spin 800ms linear infinite',
             boxSizing: 'border-box',
@@ -563,9 +563,10 @@ function AuthLoadingScreen({ progress }: { progress: AuthProgress }) {
       {/* Heading */}
       <span
         style={{
-          fontFamily: 'Inter, system-ui, sans-serif',
-          fontSize: 20,
-          fontWeight: 500,
+          fontFamily: 'var(--font-serif)',
+          fontSize: 22,
+          fontWeight: 400,
+          letterSpacing: '-0.02em',
           color: C.t1,
         }}
       >
@@ -575,7 +576,7 @@ function AuthLoadingScreen({ progress }: { progress: AuthProgress }) {
       {/* Subtext */}
       <span
         style={{
-          fontFamily: 'Inter, system-ui, sans-serif',
+          fontFamily: 'var(--font-body)',
           fontSize: 14,
           fontWeight: 500,
           color: C.t2,
@@ -592,7 +593,7 @@ function AuthLoadingScreen({ progress }: { progress: AuthProgress }) {
           background: 'transparent',
           border: 'none',
           cursor: 'pointer',
-          fontFamily: 'Inter, system-ui, sans-serif',
+          fontFamily: 'var(--font-body)',
           fontSize: 14,
           fontWeight: 500,
           color: C.t3,
@@ -639,7 +640,7 @@ function AuthErrorScreen({
         fontFamily: 'inherit',
       }}
     >
-      <span>{label}</span>
+      <span style={{ fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 400, letterSpacing: '-0.02em', color: C.t1 }}>{label}</span>
       {retryAfterMs !== null && (
         <span style={{ color: C.t3, fontSize: 14 }}>
           Auto-retry in {Math.round(retryAfterMs / 1000)}s
