@@ -65,6 +65,8 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             events::NewSourceDetected,
             events::ImageDownloadFailed,
             events::ImageDownloadComplete,
+            events::AuthAdoptedFromCli,
+            events::CliHandoffRequested,
         ])
 }
 
@@ -239,6 +241,34 @@ pub fn run() {
                 app.deep_link().on_open_url(move |event| {
                     let urls = event.urls();
                     for url in &urls {
+                        // CLI handoff route: `cinch://login?relay=…&from=cli`.
+                        // Focus the main window and emit an event so the React
+                        // layer opens the AddRelayDialog with the relay
+                        // pre-filled. No credential write here — the user
+                        // still has to complete OAuth in the dialog.
+                        let is_login = url.host_str() == Some("login")
+                            || url.path() == "/login"
+                            || (url.scheme() == "cinch" && url.path() == "/login");
+                        if is_login {
+                            if let Some(window) = dl_app_handle.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                            let relay = url
+                                .query_pairs()
+                                .find(|(k, _)| k == "relay")
+                                .map(|(_, v)| v.to_string())
+                                .unwrap_or_default();
+                            if let Err(e) = (crate::events::CliHandoffRequested {
+                                relay_url: relay,
+                            })
+                            .emit(&dl_app_handle)
+                            {
+                                log::warn!("emit CliHandoffRequested failed: {}", e);
+                            }
+                            continue;
+                        }
+
                         let is_auth =
                             url.host_str() == Some("auth") || url.path() == "/auth/callback";
                         if !is_auth {
@@ -306,10 +336,17 @@ pub fn run() {
                                     }
                                 }
                             } else {
-                                if let Err(e) = crate::auth::write_credentials(
-                                    &user_id, &device_id, &token, &relay, &hostname,
+                                if let Err(e) = client_core::auth_session::install_credentials(
+                                    client_core::auth_session::InstallParams {
+                                        user_id: &user_id,
+                                        device_id: &device_id,
+                                        token: &token,
+                                        relay_url: &relay,
+                                        hostname: &hostname,
+                                        device_private_key: None,
+                                    },
                                 ) {
-                                    log::error!("deep-link credential write failed: {}", e);
+                                    log::error!("deep-link install_credentials failed: {}", e);
                                     return;
                                 }
                                 let relay_id = crate::auth::load_multi_config()

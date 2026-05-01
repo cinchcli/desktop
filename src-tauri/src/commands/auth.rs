@@ -73,9 +73,14 @@ pub fn sign_in(
     tauri::async_runtime::spawn(async move {
         // Step 1: Issue a device code so the browser auth page can complete the flow.
         let client = reqwest::Client::new();
+        let machine_id = client_core::machine::stable_machine_id();
+        let mut dc_body = serde_json::json!({"hostname": hostname2});
+        if !machine_id.is_empty() {
+            dc_body["machine_id"] = serde_json::Value::String(machine_id.clone());
+        }
         let dc_resp = match client
             .post(format!("{}/auth/device-code", relay2))
-            .json(&serde_json::json!({"hostname": hostname2}))
+            .json(&dc_body)
             .timeout(std::time::Duration::from_secs(10))
             .send()
             .await
@@ -140,12 +145,21 @@ pub fn sign_in(
             return;
         }
 
-        // Step 3: Poll until the user completes OAuth.
+        // Step 3: Poll until the user completes OAuth. Tight cadence early
+        // (1s) so OAuth completion is caught quickly; back off to 3s after
+        // 20s if the user is taking their time in the browser.
         let poll_url = format!("{}/auth/device-code/poll?code={}", relay2, device_code);
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5 * 60);
+        let started = tokio::time::Instant::now();
+        let deadline = started + std::time::Duration::from_secs(5 * 60);
+        let fast_window = std::time::Duration::from_secs(20);
 
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            let interval = if started.elapsed() < fast_window {
+                std::time::Duration::from_secs(1)
+            } else {
+                std::time::Duration::from_secs(3)
+            };
+            tokio::time::sleep(interval).await;
 
             if tokio::time::Instant::now() > deadline {
                 log::warn!("sign_in: device-code poll timed out");
@@ -202,11 +216,21 @@ pub fn sign_in(
                 device_id,
             );
 
-            // Write credentials to disk / keychain.
-            if let Err(e) =
-                crate::auth::write_credentials(&user_id, &device_id, &token, &relay2, &hostname2)
-            {
-                log::error!("sign_in: credential write failed: {}", e);
+            // Write credentials atomically: token + AES key + X25519 device
+            // key + config in one transaction with a single credential_version
+            // bump. The CLI watcher (and our own propagate.rs) only see a
+            // fully-formed credential set on the bump.
+            if let Err(e) = client_core::auth_session::install_credentials(
+                client_core::auth_session::InstallParams {
+                    user_id: &user_id,
+                    device_id: &device_id,
+                    token: &token,
+                    relay_url: &relay2,
+                    hostname: &hostname2,
+                    device_private_key: None,
+                },
+            ) {
+                log::error!("sign_in: install_credentials failed: {}", e);
                 transition(&app2, &handle2, AuthState::LocalOnly);
                 return;
             }
@@ -340,9 +364,18 @@ pub async fn handle_deeplink(
         }
         relay_id
     } else {
-        // Update active relay credentials (original sign-in flow)
-        crate::auth::write_credentials(&user_id, &device_id, &token, &relay_url, &hostname)
-            .map_err(|e| format!("persist creds: {}", e))?;
+        // Update active relay credentials atomically (original sign-in flow).
+        client_core::auth_session::install_credentials(
+            client_core::auth_session::InstallParams {
+                user_id: &user_id,
+                device_id: &device_id,
+                token: &token,
+                relay_url: &relay_url,
+                hostname: &hostname,
+                device_private_key: None,
+            },
+        )
+        .map_err(|e| format!("persist creds: {}", e))?;
 
         // Reload and get the active relay_id
         let new_mc = load_multi_config().map_err(|e| format!("load multi_config: {}", e))?;

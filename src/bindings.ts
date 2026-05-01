@@ -91,7 +91,9 @@ export const commands = {
 
 /** Events */
 export const events = {
+	authAdoptedFromCli: makeEvent<AuthAdoptedFromCli>("auth-adopted-from-cli"),
 	authStateChanged: makeEvent<AuthStateChanged>("auth-state-changed"),
+	cliHandoffRequested: makeEvent<CliHandoffRequested>("cli-handoff-requested"),
 	clipDeleted: makeEvent<ClipDeleted>("clip-deleted"),
 	clipReceived: makeEvent<ClipReceived>("clip-received"),
 	imageDownloadComplete: makeEvent<ImageDownloadComplete>("image-download-complete"),
@@ -101,6 +103,16 @@ export const events = {
 };
 
 /* Types */
+/**
+ *  Fired when the desktop notices that credentials on disk came from the CLI
+ *  (the FS watcher observed a credential_version bump while the desktop was
+ *  in LocalOnly). The frontend uses this to surface a one-shot toast so the
+ *  user knows their CLI sign-in carried over.
+ */
+export type AuthAdoptedFromCli = {
+	user_short: string,
+};
+
 export type AuthErrorReason = { kind: "RelayUnreachable" } | { kind: "KeyringUnavailable" } | { kind: "NetworkDown" } | { kind: "InvalidPairToken" };
 
 export type AuthProgress = { kind: "SigningIn" } | { kind: "Pairing" } | { kind: "RotatingToken" };
@@ -119,6 +131,15 @@ export type AuthState = { variant: "LocalOnly" } | { variant: "Authenticating"; 
 } };
 
 export type AuthStateChanged = AuthState;
+
+/**
+ *  Fired when the desktop receives a `cinch://login?relay=…&from=cli` deep
+ *  link from the CLI's handoff. The React layer responds by opening the
+ *  AddRelayDialog with the relay URL pre-filled.
+ */
+export type CliHandoffRequested = {
+	relay_url: string,
+};
 
 export type ClipDeleted = string;
 

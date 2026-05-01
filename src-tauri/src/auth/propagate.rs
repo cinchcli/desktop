@@ -11,6 +11,7 @@ use log::{info, warn};
 use notify::RecursiveMode;
 use notify_debouncer_full::{new_debouncer, DebounceEventResult};
 use tauri::AppHandle;
+use tauri_specta::Event;
 
 use crate::auth::credential::CredentialError;
 use crate::auth::{self, credential, AuthState, AuthStateHandle};
@@ -98,14 +99,37 @@ pub fn spawn_credential_watcher(
                 cfg.credential_version
             );
 
+            // Capture the prior state BEFORE transition so we can detect
+            // LocalOnly → Authenticated, which is the signal that creds came
+            // from the CLI (or another out-of-process writer).
+            let was_local_only = matches!(
+                handle_clone.lock().map(|g| g.clone()).ok(),
+                Some(AuthState::LocalOnly)
+            );
+
             // Construct the canonical next AuthState from the fresh Config snapshot.
             // D-15 row "FS watcher credential_version up" → re-read creds; resulting state
             // is Authenticated (if creds resolvable) or LocalOnly (if torn down).
             let next = next_state_from_config(&cfg);
+            let became_authenticated = matches!(next, AuthState::Authenticated { .. });
 
             // Single emitter per D-13: transition() atomically updates the Mutex-held
             // AuthState AND emits `auth-state-changed` with the discriminated-union payload.
             auth::transition(&app_clone, &handle_clone, next);
+
+            // Surface a one-shot toast: "Signed in via your terminal."
+            if was_local_only && became_authenticated {
+                let user_short = if cfg.user_id.len() >= 8 {
+                    cfg.user_id[..8].to_string()
+                } else {
+                    cfg.user_id.clone()
+                };
+                if let Err(e) =
+                    (crate::events::AuthAdoptedFromCli { user_short }).emit(&app_clone)
+                {
+                    warn!("emit AuthAdoptedFromCli failed: {}", e);
+                }
+            }
         }
     });
 
