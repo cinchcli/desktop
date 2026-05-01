@@ -146,8 +146,8 @@ export function AddRelayDialog({ onClose, initialRelayUrl, fromCli }: AddRelayDi
       marginBottom: 12,
     }),
     connectBtn: (loading?: boolean) => ({
-      background: C.accent,
-      color: C.accentOn,
+      background: C.t1,
+      color: C.bg,
       border: "none",
       borderRadius: 6,
       padding: "8px 18px",

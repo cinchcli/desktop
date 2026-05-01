@@ -30,7 +30,7 @@ export function UpgradePrompt({ onDismiss }: UpgradePromptProps) {
     >
       <span
         style={{
-          fontFamily: "Inter, system-ui, sans-serif",
+          fontFamily: 'var(--font-body)',
           fontSize: 14,
           fontWeight: 500,
           color: C.t2,
@@ -49,7 +49,7 @@ export function UpgradePrompt({ onDismiss }: UpgradePromptProps) {
             fontSize: "inherit",
             fontWeight: "inherit",
             letterSpacing: "inherit",
-            color: hover ? C.accent : C.t1,
+            color: hover ? C.t2 : C.t1,
             textDecoration: "underline",
             textUnderlineOffset: "2px",
             padding: 0,

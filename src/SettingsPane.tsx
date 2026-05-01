@@ -289,9 +289,10 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
       margin: "24px 0",
     },
     clearSectionHeader: {
-      fontSize: 16,
-      fontWeight: 600,
-      letterSpacing: "0.2px",
+      fontFamily: 'var(--font-serif)',
+      fontSize: 17,
+      fontWeight: 400,
+      letterSpacing: '-0.02em',
       color: C.t1,
       marginBottom: 12,
     },
@@ -379,7 +380,7 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
               style={{
                 background: "none",
                 border: "none",
-                borderBottom: activeTab === tab ? `2px solid ${C.accent}` : "2px solid transparent",
+                borderBottom: activeTab === tab ? `2px solid ${C.t1}` : "2px solid transparent",
                 color: activeTab === tab ? C.t1 : C.t3,
                 fontSize: 13,
                 fontWeight: 500,
@@ -399,7 +400,7 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
         {activeTab === "servers" && (
           <>
             {/* Relay Server */}
-            <div style={{ fontSize: 13, fontWeight: 600, color: C.t2, letterSpacing: "0.3px", marginBottom: 10 }}>
+            <div style={{ fontFamily: 'var(--font-serif)', fontSize: 17, fontWeight: 400, letterSpacing: '-0.02em', color: C.t1, marginBottom: 10 }}>
               Relay server
             </div>
             {auth.variant === "Authenticated" ? (
@@ -431,7 +432,7 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
                 <button
                   type="button"
                   onClick={() => setAddRelayOpen(true)}
-                  style={{ background: C.accent, color: C.accentOn, border: "none", borderRadius: 5, fontSize: 12, fontWeight: 600, padding: "6px 14px", cursor: "pointer" }}
+                  style={{ background: C.t1, color: C.bg, border: "none", borderRadius: 5, fontSize: 12, fontWeight: 600, padding: "6px 14px", cursor: "pointer" }}
                 >
                   Connect to relay
                 </button>
@@ -439,7 +440,7 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
             )}
 
             {/* Remote Machines */}
-            <div style={{ fontSize: 13, fontWeight: 600, color: C.t2, letterSpacing: "0.3px", marginBottom: 10 }}>
+            <div style={{ fontFamily: 'var(--font-serif)', fontSize: 17, fontWeight: 400, letterSpacing: '-0.02em', color: C.t1, marginBottom: 10 }}>
               Remote machines
             </div>
             <MachinesPanel
@@ -524,7 +525,7 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
 
             <div style={styles.section}>
               <div style={{
-                fontSize: 14, fontWeight: 500, letterSpacing: "0.2px", color: C.t2,
+                fontFamily: 'var(--font-serif)', fontSize: 17, fontWeight: 400, letterSpacing: '-0.02em', color: C.t1,
                 marginBottom: 4,
               }}>
                 Global shortcut
