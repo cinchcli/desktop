@@ -16,7 +16,7 @@ import { IconX } from "./icons";
 import ConfirmDialog from "./ConfirmDialog";
 import RetentionSlider from "./RetentionSlider";
 import { AddRelayDialog } from "./components/AddRelayDialog";
-import { DeviceDashboard } from "./components/DeviceDashboard";
+import { MachinesPanel } from "./components/MachinesPanel";
 import { useAuthState, signOut } from "./state/auth";
 
 interface SettingsPaneProps {
@@ -442,7 +442,7 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
             <div style={{ fontSize: 13, fontWeight: 600, color: C.t2, letterSpacing: "0.3px", marginBottom: 10 }}>
               Remote machines
             </div>
-            <DeviceDashboard
+            <MachinesPanel
               currentDeviceID={auth.variant === "Authenticated" ? auth.payload.device_id : ""}
               onShowToast={() => {}}
             />

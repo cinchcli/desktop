@@ -2,11 +2,13 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { commands } from "../bindings";
 import { unwrap } from "../lib/tauri";
 import { C, formatTime } from "../design";
+import { sourcePillVars } from "../lib/sourceColor";
 import type { Device, SourceInfo } from "../bindings";
+import ConfirmDialog from "../ConfirmDialog";
 
 // ─── Props ────────────────────────────────────────────────
 
-interface DeviceDashboardProps {
+interface MachinesPanelProps {
   currentDeviceID: string;
   onShowToast: (message: string) => void;
   onDeviceChange?: () => void;
@@ -19,24 +21,9 @@ type MergedEntry =
   | { kind: "source_only"; source: SourceInfo }
   | { kind: "local" };
 
-// ─── Helpers ──────────────────────────────────────────────
+// ─── MachinesPanel ────────────────────────────────────────
 
-/** Deterministic hue from device ID for the identity dot (per D-16). */
-function deviceHue(deviceID: string): string {
-  let hash = 0;
-  for (let i = 0; i < deviceID.length; i++) {
-    hash = (hash * 31 + deviceID.charCodeAt(i)) & 0xffff;
-  }
-  return `hsl(${hash % 360}, 55%, 58%)`;
-}
-
-function sourceName(source: string): string {
-  return source.replace(/^remote:/, "");
-}
-
-// ─── DeviceDashboard ──────────────────────────────────────
-
-export function DeviceDashboard({ currentDeviceID, onShowToast, onDeviceChange }: DeviceDashboardProps) {
+export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: MachinesPanelProps) {
   const [devices, setDevices] = useState<Device[]>([]);
   const [sources, setSources] = useState<SourceInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,12 +63,18 @@ export function DeviceDashboard({ currentDeviceID, onShowToast, onDeviceChange }
   // machines (sources without a matching device), then local.
   const merged: MergedEntry[] = (() => {
     const deviceSourceKeys = new Set(devices.map(d => d.source_key));
+    const currentDeviceIsPaired = devices.some(d => d.id === currentDeviceID);
     const entries: MergedEntry[] = devices.map(d => ({ kind: "device", device: d }));
 
     for (const s of sources) {
       if (s.source === "local") {
-        // current machine — add as local entry only if not already represented
-        if (!entries.some(e => e.kind === "local")) {
+        // The "local" source represents clips made on this machine. When the
+        // current machine is already in the paired-devices list, that row
+        // already represents this machine — adding a synthetic "This machine"
+        // row would duplicate it. Only add the synthetic entry if the current
+        // device isn't paired (e.g., transient relay/auth lag), and at most
+        // once.
+        if (!currentDeviceIsPaired && !entries.some(e => e.kind === "local")) {
           entries.push({ kind: "local" });
         }
       } else if (!deviceSourceKeys.has(s.source)) {
@@ -101,7 +94,7 @@ export function DeviceDashboard({ currentDeviceID, onShowToast, onDeviceChange }
       await fetchAll();
       onDeviceChange?.();
     } catch (_e) {
-      setNicknameError("Save failed \u2014 try again");
+      setNicknameError("Save failed — try again");
       if (nicknameErrorTimer.current) clearTimeout(nicknameErrorTimer.current);
       nicknameErrorTimer.current = setTimeout(() => setNicknameError(null), 3000);
     } finally {
@@ -112,17 +105,17 @@ export function DeviceDashboard({ currentDeviceID, onShowToast, onDeviceChange }
 
   // ── Revoke ──────────────────────────────────────────────
 
-  const revokeDevice = async (deviceId: string) => {
+  const revokeDevice = useCallback(async (deviceId: string) => {
     try {
       await unwrap(commands.revokeDevice(deviceId));
       onShowToast("Device revoked");
       await fetchAll();
       onDeviceChange?.();
     } catch (_e) {
-      onShowToast("Failed to revoke device \u2014 try again");
+      onShowToast("Failed to revoke device — try again");
     }
     setConfirmingRevokeId(null);
-  };
+  }, [fetchAll, onDeviceChange, onShowToast]);
 
   // ── Nickname edit interaction ───────────────────────────
 
@@ -147,6 +140,7 @@ export function DeviceDashboard({ currentDeviceID, onShowToast, onDeviceChange }
     }
   };
 
+  // Focus input when editing starts
   useEffect(() => {
     if (editingDeviceId && editInputRef.current) {
       editInputRef.current.focus();
@@ -154,6 +148,7 @@ export function DeviceDashboard({ currentDeviceID, onShowToast, onDeviceChange }
     }
   }, [editingDeviceId]);
 
+  // Esc/Enter on revoke confirm dialog (keyboard accessibility)
   useEffect(() => {
     if (!confirmingRevokeId) return;
     const handler = (e: KeyboardEvent) => {
@@ -162,7 +157,7 @@ export function DeviceDashboard({ currentDeviceID, onShowToast, onDeviceChange }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [confirmingRevokeId]);
+  }, [confirmingRevokeId, revokeDevice]);
 
   const lastSeen = (device: Device): string => {
     return device.last_push_at
@@ -213,7 +208,15 @@ export function DeviceDashboard({ currentDeviceID, onShowToast, onDeviceChange }
   const pairedCount = devices.length;
   const totalCount = merged.length;
 
-  // ── Machine list ─────────────────────────────────────────
+  // The device being confirmed for revoke (needed for ConfirmDialog label)
+  const confirmingDevice = confirmingRevokeId
+    ? devices.find(d => d.id === confirmingRevokeId)
+    : undefined;
+  const confirmingDisplayName = confirmingDevice
+    ? (confirmingDevice.nickname || confirmingDevice.hostname || confirmingRevokeId)
+    : confirmingRevokeId;
+
+  // ── Machine grid ─────────────────────────────────────────
 
   return (
     <div style={S.panel}>
@@ -224,39 +227,48 @@ export function DeviceDashboard({ currentDeviceID, onShowToast, onDeviceChange }
         </span>
       </div>
 
-      <div role="list" aria-label="Machines" style={S.listContainer}>
+      <div role="list" aria-label="Machines" style={S.grid}>
         {merged.map((entry) => {
           if (entry.kind === "local") {
             return (
-              <div key="local" role="listitem" style={S.deviceRow}>
-                <span style={{ ...S.dot, backgroundColor: C.t4 }} aria-hidden="true" />
-                <span style={{ ...S.dot, backgroundColor: C.success }} aria-label="Online" />
-                <div style={S.nameCol}>
-                  <span style={S.nickname}>This machine</span>
-                  <span style={S.hostname}>local clips</span>
-                </div>
-                <span style={S.lastSeen} />
-                <div style={S.actionCol}>
+              <div key="local" role="listitem" style={S.card}>
+                <div style={S.cardHeader}>
+                  <span style={{ ...S.statusDot, backgroundColor: C.success }} aria-label="Online" />
                   <span style={S.thisDeviceBadge}>This device</span>
                 </div>
+                <div style={S.cardName}>This machine</div>
+                <div style={S.cardMeta}>local clips</div>
               </div>
             );
           }
 
           if (entry.kind === "source_only") {
             const s = entry.source;
+            const name = s.source.replace(/^remote:/, "");
+            const pillVars = sourcePillVars(s.source);
             return (
-              <div key={s.source} role="listitem" style={S.deviceRow}>
-                <span style={{ ...S.dot, backgroundColor: C.t4 }} aria-hidden="true" />
-                <span style={{ ...S.dot, backgroundColor: C.t4 }} aria-label="Unknown status" />
-                <div style={S.nameCol}>
-                  <span style={S.nickname}>{sourceName(s.source)}</span>
-                  <span style={S.hostname}>{s.clip_count} clips</span>
+              <div key={s.source} role="listitem" style={S.card}>
+                <div style={S.cardHeader}>
+                  <span
+                    style={{
+                      ...S.statusDot,
+                      backgroundColor: C.t4,
+                    }}
+                    aria-label="Unknown status"
+                  />
+                  <span
+                    style={{
+                      ...S.sourcePill,
+                      background: pillVars.bg,
+                      color: pillVars.fg,
+                    }}
+                  >
+                    {name}
+                  </span>
                 </div>
-                <span style={S.lastSeen}>
-                  {formatTime(s.last_seen)}
-                </span>
-                <div style={S.actionCol}>
+                <div style={S.cardName}>{name}</div>
+                <div style={S.cardMeta}>{s.clip_count} clips · {formatTime(s.last_seen)}</div>
+                <div style={S.cardFooter}>
                   <span style={{ ...S.thisDeviceBadge, color: C.t4 }}>Not paired</span>
                 </div>
               </div>
@@ -267,21 +279,34 @@ export function DeviceDashboard({ currentDeviceID, onShowToast, onDeviceChange }
           const device = entry.device;
           const isCurrentDevice = device.id === currentDeviceID;
           const isEditing = editingDeviceId === device.id;
-          const isConfirmingRevoke = confirmingRevokeId === device.id;
-          const displayName = device.nickname || device.hostname;
+          const displayName = device.nickname || device.hostname || "";
+          const pillVars = sourcePillVars(device.source_key ?? device.id ?? "");
 
           return (
-            <div key={device.id} role="listitem" style={S.deviceRow}>
-              <span
-                style={{ ...S.dot, backgroundColor: deviceHue(device.id ?? "") }}
-                aria-hidden="true"
-              />
-              <span
-                style={{ ...S.dot, backgroundColor: device.online ? C.success : C.t4 }}
-                aria-label={device.online ? "Online" : "Offline"}
-              />
+            <div key={device.id} role="listitem" style={S.card}>
+              <div style={S.cardHeader}>
+                <span
+                  style={{
+                    ...S.statusDot,
+                    backgroundColor: device.online ? C.success : C.t4,
+                  }}
+                  aria-label={device.online ? "Online" : "Offline"}
+                />
+                <span
+                  style={{
+                    ...S.sourcePill,
+                    background: pillVars.bg,
+                    color: pillVars.fg,
+                  }}
+                >
+                  {device.hostname ?? "unknown"}
+                </span>
+                {isCurrentDevice && (
+                  <span style={S.thisDeviceBadge}>This device</span>
+                )}
+              </div>
 
-              <div style={S.nameCol}>
+              <div style={S.nameRow}>
                 {isEditing ? (
                   <input
                     ref={editInputRef}
@@ -303,7 +328,7 @@ export function DeviceDashboard({ currentDeviceID, onShowToast, onDeviceChange }
                   />
                 ) : (
                   <span
-                    style={S.nickname}
+                    style={S.cardName}
                     onClick={() => startEdit(device)}
                     title="Click to edit nickname"
                   >
@@ -313,36 +338,50 @@ export function DeviceDashboard({ currentDeviceID, onShowToast, onDeviceChange }
                 {nicknameError && editingDeviceId === device.id && (
                   <span style={S.nicknameErrorText}>{nicknameError}</span>
                 )}
-                <span style={S.hostname}>@{device.hostname}</span>
               </div>
 
-              <span style={S.lastSeen}>{lastSeen(device)}</span>
+              <div style={S.cardMeta}>{lastSeen(device)}</div>
 
-              <div style={S.actionCol}>
-                {isConfirmingRevoke ? (
-                  <div style={S.revokeConfirm}>
-                    <button style={S.keepBtn} onClick={() => setConfirmingRevokeId(null)}>
-                      Keep
-                    </button>
-                    <button style={S.revokeConfirmBtn} onClick={() => revokeDevice(device.id ?? "")}>
-                      Revoke &ldquo;{displayName}&rdquo;
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    {isCurrentDevice && (
-                      <span style={S.thisDeviceBadge}>This device</span>
-                    )}
-                    <button style={S.revokeBtn} onClick={() => setConfirmingRevokeId(device.id ?? null)}>
-                      Revoke
-                    </button>
-                  </>
-                )}
+              <div style={S.cardFooter}>
+                <button
+                  style={S.revokeBtn}
+                  onClick={() => setConfirmingRevokeId(device.id ?? null)}
+                >
+                  Revoke
+                </button>
               </div>
             </div>
           );
         })}
+
+        {/* Pair card — always shown at end of grid */}
+        <div style={S.pairCard} role="listitem">
+          <div style={S.pairCardInner}>
+            <div style={S.pairHeading}>Pair a machine</div>
+            <div style={S.pairBody}>Run on another machine:</div>
+            <code style={S.pairCode}>cinch auth pair</code>
+          </div>
+        </div>
       </div>
+
+      {/* Revoke confirm dialog */}
+      <ConfirmDialog
+        open={confirmingRevokeId !== null}
+        title="Revoke device?"
+        body={
+          <>
+            Remove <strong>{confirmingDisplayName}</strong> from your account. It
+            will no longer sync clips.
+          </>
+        }
+        primaryLabel={`Revoke "${confirmingDisplayName}"`}
+        secondaryLabel="Keep"
+        tone="destructive"
+        onConfirm={() => {
+          if (confirmingRevokeId) revokeDevice(confirmingRevokeId);
+        }}
+        onCancel={() => setConfirmingRevokeId(null)}
+      />
     </div>
   );
 }
@@ -382,36 +421,70 @@ const S: Record<string, React.CSSProperties> = {
     fontVariantNumeric: "tabular-nums",
   },
 
-  listContainer: {
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+    gap: 12,
+    padding: 16,
     overflowY: "auto",
     flex: 1,
+    alignContent: "start",
   },
 
-  deviceRow: {
+  card: {
+    background: C.card,
+    border: `1px solid ${C.border}`,
+    borderRadius: 10,
+    padding: "12px 14px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+  },
+
+  cardHeader: {
     display: "flex",
     alignItems: "center",
-    gap: 8,
-    padding: "12px 16px",
-    minHeight: 44,
-    borderBottom: `1px solid ${C.border}`,
+    gap: 6,
+    flexWrap: "wrap",
   },
 
-  dot: {
+  statusDot: {
     width: 8,
     height: 8,
     borderRadius: "50%",
     flexShrink: 0,
   },
 
-  nameCol: {
-    flex: 1,
-    minWidth: 0,
+  sourcePill: {
+    fontSize: 11,
+    fontWeight: 600,
+    padding: "2px 6px",
+    borderRadius: 4,
+    fontFamily: "Inter, system-ui, sans-serif",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    maxWidth: 120,
+  },
+
+  thisDeviceBadge: {
+    background: C.card2,
+    fontSize: 11,
+    fontWeight: 600,
+    color: C.t3,
+    padding: "2px 6px",
+    borderRadius: 4,
+    fontFamily: "Inter, system-ui, sans-serif",
+    whiteSpace: "nowrap",
+  },
+
+  nameRow: {
     display: "flex",
     flexDirection: "column",
     gap: 2,
   },
 
-  nickname: {
+  cardName: {
     fontSize: 13,
     fontWeight: 500,
     color: C.t1,
@@ -445,42 +518,22 @@ const S: Record<string, React.CSSProperties> = {
     fontFamily: "Inter, system-ui, sans-serif",
   },
 
-  hostname: {
+  cardMeta: {
     fontSize: 12,
     fontWeight: 500,
     color: C.t3,
+    fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+    fontVariantNumeric: "tabular-nums",
     whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
-    fontFamily: "Inter, system-ui, sans-serif",
-    lineHeight: 1.33,
   },
 
-  lastSeen: {
-    fontSize: 12,
-    fontWeight: 500,
-    color: C.t2,
-    fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-    fontVariantNumeric: "tabular-nums",
-    flexShrink: 0,
-    whiteSpace: "nowrap",
-  },
-
-  actionCol: {
+  cardFooter: {
     display: "flex",
     alignItems: "center",
-    flexShrink: 0,
-  },
-
-  thisDeviceBadge: {
-    background: C.card2,
-    fontSize: 12,
-    fontWeight: 600,
-    color: C.t3,
-    padding: "2px 8px",
-    borderRadius: 6,
-    fontFamily: "Inter, system-ui, sans-serif",
-    whiteSpace: "nowrap",
+    gap: 6,
+    marginTop: 2,
   },
 
   revokeBtn: {
@@ -496,36 +549,41 @@ const S: Record<string, React.CSSProperties> = {
     whiteSpace: "nowrap",
   },
 
-  revokeConfirm: {
+  pairCard: {
+    background: C.card2,
+    border: `1px dashed ${C.border}`,
+    borderRadius: 10,
+    padding: "12px 14px",
     display: "flex",
     alignItems: "center",
-    gap: 6,
+    justifyContent: "center",
   },
 
-  keepBtn: {
-    background: "transparent",
+  pairCardInner: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    textAlign: "center",
+  },
+
+  pairHeading: {
+    fontSize: 12,
+    fontWeight: 600,
+    color: C.t2,
+    fontFamily: "Inter, system-ui, sans-serif",
+  },
+
+  pairBody: {
+    fontSize: 12,
+    fontWeight: 500,
     color: C.t3,
-    border: "none",
-    borderRadius: 6,
-    padding: "4px 8px",
-    fontSize: 12,
-    fontWeight: 500,
-    cursor: "pointer",
     fontFamily: "Inter, system-ui, sans-serif",
-    whiteSpace: "nowrap",
   },
 
-  revokeConfirmBtn: {
-    background: "transparent",
-    color: C.error,
-    border: "1px solid rgba(255,99,99,0.25)",
-    borderRadius: 6,
-    padding: "4px 8px",
+  pairCode: {
     fontSize: 12,
-    fontWeight: 500,
-    cursor: "pointer",
-    fontFamily: "Inter, system-ui, sans-serif",
-    whiteSpace: "nowrap",
+    fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+    color: C.t3,
   },
 
   emptyState: {
