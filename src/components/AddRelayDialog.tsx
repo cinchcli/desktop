@@ -7,6 +7,10 @@ import { IconX } from "../icons";
 
 interface AddRelayDialogProps {
   onClose: () => void;
+  /// When set, pre-fills the relay URL field and switches the dialog title
+  /// to indicate the dialog was opened by a CLI handoff (cinch://login).
+  initialRelayUrl?: string;
+  fromCli?: boolean;
 }
 
 type Method = "browser" | "token";
@@ -26,11 +30,11 @@ async function fetchProviders(relayUrl: string): Promise<Provider[]> {
   }
 }
 
-export function AddRelayDialog({ onClose }: AddRelayDialogProps) {
+export function AddRelayDialog({ onClose, initialRelayUrl, fromCli }: AddRelayDialogProps) {
   const [method, setMethod] = useState<Method>("browser");
 
   // Browser method
-  const [browserUrl, setBrowserUrl] = useState("");
+  const [browserUrl, setBrowserUrl] = useState(initialRelayUrl ?? "");
   const [browserLoading, setBrowserLoading] = useState(false);
   const [browserError, setBrowserError] = useState<string | null>(null);
   const [providers, setProviders] = useState<Provider[] | null>(null); // null = not yet fetched
@@ -261,7 +265,9 @@ export function AddRelayDialog({ onClose }: AddRelayDialogProps) {
     <div style={S.overlay} onClick={onClose} role="presentation">
       <div style={S.pane} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div style={S.titleRow}>
-          <div style={{ fontSize: 16, fontWeight: 600 }}>Connect to relay</div>
+          <div style={{ fontSize: 16, fontWeight: 600 }}>
+            {fromCli ? "Sign in to share with CLI" : "Connect to relay"}
+          </div>
           <button
             type="button"
             onClick={onClose}
@@ -272,16 +278,18 @@ export function AddRelayDialog({ onClose }: AddRelayDialogProps) {
           </button>
         </div>
 
-        <div style={S.radioRow}>
-          <label style={S.radioLabel(method === "browser")}>
-            <input type="radio" checked={method === "browser"} onChange={() => setMethod("browser")} style={{ accentColor: C.accent }} />
-            Sign in with browser
-          </label>
-          <label style={S.radioLabel(method === "token")}>
-            <input type="radio" checked={method === "token"} onChange={() => setMethod("token")} style={{ accentColor: C.accent }} />
-            Paste pairing token
-          </label>
-        </div>
+        {!fromCli && (
+          <div style={S.radioRow}>
+            <label style={S.radioLabel(method === "browser")}>
+              <input type="radio" checked={method === "browser"} onChange={() => setMethod("browser")} style={{ accentColor: C.accent }} />
+              Sign in with browser
+            </label>
+            <label style={S.radioLabel(method === "token")}>
+              <input type="radio" checked={method === "token"} onChange={() => setMethod("token")} style={{ accentColor: C.accent }} />
+              Paste pairing token
+            </label>
+          </div>
+        )}
 
         {method === "browser" && (
           <>

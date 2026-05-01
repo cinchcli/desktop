@@ -22,6 +22,8 @@ import SettingsPane from "./SettingsPane";
 import { LocalOnlyView } from "./components/LocalOnlyView";
 import { SourcePill } from "./components/SourcePill";
 import { DeviceDashboard } from "./components/DeviceDashboard";
+import { AdoptedAuthToast } from "./components/AdoptedAuthToast";
+import { AddRelayDialog } from "./components/AddRelayDialog";
 import "./App.css";
 
 // ─── Theme ─────────────────────────────────────────────────
@@ -77,6 +79,16 @@ function handleWindowDrag(e: React.MouseEvent) {
 function App() {
   const { theme, toggle: toggleTheme } = useTheme();
   const auth = useAuthState();
+  // CLI handoff (cinch://login from `cinch auth login`). Shown above all
+  // auth-state branches so the dialog opens regardless of LocalOnly /
+  // Authenticating / Authenticated.
+  const [handoffRelay, setHandoffRelay] = useState<string | null>(null);
+  useEffect(() => {
+    const unsubP = events.cliHandoffRequested.listen((e) => {
+      setHandoffRelay(e.payload.relay_url || "");
+    });
+    return () => { unsubP.then((f) => f()); };
+  }, []);
   const [_status, setStatus] = useState("connecting");
   const [clips, setClips] = useState<LocalClip[]>([]);
   const [sources, setSources] = useState<SourceInfo[]>([]);
@@ -368,6 +380,14 @@ function App() {
     <SettingsPane onClose={() => { setShowSettings(false); if (auth.variant === "Authenticated") refreshDevices(); }} clipCount={totalClips} />
   ) : null;
 
+  const handoffDialog = handoffRelay !== null ? (
+    <AddRelayDialog
+      onClose={() => setHandoffRelay(null)}
+      initialRelayUrl={handoffRelay}
+      fromCli
+    />
+  ) : null;
+
   if (auth.variant === "LocalOnly") {
     return (
       <>
@@ -377,6 +397,8 @@ function App() {
           onOpenSettings={() => setShowSettings(true)}
         />
         {settingsOverlay}
+        {handoffDialog}
+        <AdoptedAuthToast />
       </>
     );
   }
@@ -635,6 +657,12 @@ function App() {
 
       {/* Toast notification */}
       {toast && <Toast message={toast.message} icon={toast.icon} />}
+
+      {/* Cross-process adoption toast — fires once when CLI sign-in lands */}
+      <AdoptedAuthToast />
+
+      {/* CLI handoff dialog — opens when `cinch auth login` deep-links here */}
+      {handoffDialog}
     </main>
   );
 }
@@ -951,6 +979,8 @@ function ClipDetail({ clip }: { clip: LocalClip }) {
       ? tryPrettyJson(clip.content)
       : clip.content;
   const isImage = clip.content_type === "image" && !!clip.media_path;
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => { setDims(null); }, [clip.id]);
 
   return (
     <>
@@ -974,6 +1004,12 @@ function ClipDetail({ clip }: { clip: LocalClip }) {
                 src={`cinch://media/${clip.id}`}
                 alt={`Clipboard image from ${clip.source}`}
                 style={S.img}
+                onLoad={(e) => {
+                  const img = e.currentTarget;
+                  if (img.naturalWidth && img.naturalHeight) {
+                    setDims({ w: img.naturalWidth, h: img.naturalHeight });
+                  }
+                }}
                 onError={(e) => {
                   const el = e.target as HTMLImageElement;
                   const parent = el.parentElement;
@@ -998,7 +1034,9 @@ function ClipDetail({ clip }: { clip: LocalClip }) {
           <MetaRow label="source" value={clip.source.startsWith("remote:") ? clip.source.replace("remote:", "") : clip.source} />
           <MetaRow label="type" value={clip.content_type} />
           <MetaRow label="size" value={formatBytes(clip.byte_size)} />
-          <MetaRow label="ttl" value={clip.ttl > 0 ? `${clip.ttl}s` : "permanent"} />
+          {isImage && dims && (
+            <MetaRow label="dimensions" value={`${dims.w} × ${dims.h}`} />
+          )}
           {clip.is_pinned && (
             <MetaRow label="note" value={clip.pin_note ?? "(no note)"} />
           )}
