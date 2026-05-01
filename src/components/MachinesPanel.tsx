@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { commands } from "../bindings";
-import { unwrap } from "../lib/tauri";
-import { C, formatTime } from "../design";
-import { sourcePillVars } from "../lib/sourceColor";
-import type { Device, SourceInfo } from "../bindings";
-import ConfirmDialog from "../ConfirmDialog";
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { commands } from '../bindings';
+import { unwrap } from '../lib/tauri';
+import { C, formatTime } from '../design';
+import { sourcePillVars } from '../lib/sourceColor';
+import type { Device, SourceInfo } from '../bindings';
+import ConfirmDialog from '../ConfirmDialog';
 
 // ─── Props ────────────────────────────────────────────────
 
@@ -17,20 +17,26 @@ interface MachinesPanelProps {
 // ─── Types ────────────────────────────────────────────────
 
 type MergedEntry =
-  | { kind: "device"; device: Device }
-  | { kind: "source_only"; source: SourceInfo }
-  | { kind: "local" };
+  | { kind: 'device'; device: Device }
+  | { kind: 'source_only'; source: SourceInfo }
+  | { kind: 'local' };
 
 // ─── MachinesPanel ────────────────────────────────────────
 
-export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: MachinesPanelProps) {
+export function MachinesPanel({
+  currentDeviceID,
+  onShowToast,
+  onDeviceChange,
+}: MachinesPanelProps) {
   const [devices, setDevices] = useState<Device[]>([]);
   const [sources, setSources] = useState<SourceInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState("");
+  const [editValue, setEditValue] = useState('');
   const [savingNickname, setSavingNickname] = useState(false);
-  const [confirmingRevokeId, setConfirmingRevokeId] = useState<string | null>(null);
+  const [confirmingRevokeId, setConfirmingRevokeId] = useState<string | null>(
+    null,
+  );
   const [nicknameError, setNicknameError] = useState<string | null>(null);
   const nicknameErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -43,10 +49,10 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
         unwrap(commands.listDevices()),
         unwrap(commands.getSources()),
       ]);
-      if (devs.status === "fulfilled") setDevices(devs.value);
-      if (srcs.status === "fulfilled") setSources(srcs.value);
+      if (devs.status === 'fulfilled') setDevices(devs.value);
+      if (srcs.status === 'fulfilled') setSources(srcs.value);
     } catch (e) {
-      console.error("fetchAll failed:", e);
+      console.error('fetchAll failed:', e);
     } finally {
       setLoading(false);
     }
@@ -62,23 +68,29 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
   // Produce a combined list: paired devices first, then source-only
   // machines (sources without a matching device), then local.
   const merged: MergedEntry[] = (() => {
-    const deviceSourceKeys = new Set(devices.map(d => d.source_key));
-    const currentDeviceIsPaired = devices.some(d => d.id === currentDeviceID);
-    const entries: MergedEntry[] = devices.map(d => ({ kind: "device", device: d }));
+    const deviceSourceKeys = new Set(devices.map((d) => d.source_key));
+    const currentDeviceIsPaired = devices.some((d) => d.id === currentDeviceID);
+    const entries: MergedEntry[] = devices.map((d) => ({
+      kind: 'device',
+      device: d,
+    }));
 
     for (const s of sources) {
-      if (s.source === "local") {
+      if (s.source === 'local') {
         // The "local" source represents clips made on this machine. When the
         // current machine is already in the paired-devices list, that row
         // already represents this machine — adding a synthetic "This machine"
         // row would duplicate it. Only add the synthetic entry if the current
         // device isn't paired (e.g., transient relay/auth lag), and at most
         // once.
-        if (!currentDeviceIsPaired && !entries.some(e => e.kind === "local")) {
-          entries.push({ kind: "local" });
+        if (
+          !currentDeviceIsPaired &&
+          !entries.some((e) => e.kind === 'local')
+        ) {
+          entries.push({ kind: 'local' });
         }
       } else if (!deviceSourceKeys.has(s.source)) {
-        entries.push({ kind: "source_only", source: s });
+        entries.push({ kind: 'source_only', source: s });
       }
     }
 
@@ -87,58 +99,71 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
 
   // ── Nickname save ───────────────────────────────────────
 
-  const saveNickname = async (deviceId: string, nickname: string) => {
-    setSavingNickname(true);
-    try {
-      await unwrap(commands.setDeviceNickname(deviceId, nickname));
-      await fetchAll();
-      onDeviceChange?.();
-    } catch (_e) {
-      setNicknameError("Save failed — try again");
-      if (nicknameErrorTimer.current) clearTimeout(nicknameErrorTimer.current);
-      nicknameErrorTimer.current = setTimeout(() => setNicknameError(null), 3000);
-    } finally {
-      setSavingNickname(false);
-      setEditingDeviceId(null);
-    }
-  };
+  const saveNickname = useCallback(
+    async (deviceId: string, nickname: string) => {
+      setSavingNickname(true);
+      try {
+        await unwrap(commands.setDeviceNickname(deviceId, nickname));
+        await fetchAll();
+        onDeviceChange?.();
+      } catch (_e) {
+        setNicknameError('Save failed — try again');
+        if (nicknameErrorTimer.current)
+          clearTimeout(nicknameErrorTimer.current);
+        nicknameErrorTimer.current = setTimeout(
+          () => setNicknameError(null),
+          3000,
+        );
+      } finally {
+        setSavingNickname(false);
+        setEditingDeviceId(null);
+      }
+    },
+    [fetchAll, onDeviceChange],
+  );
 
   // ── Revoke ──────────────────────────────────────────────
 
-  const revokeDevice = useCallback(async (deviceId: string) => {
-    try {
-      await unwrap(commands.revokeDevice(deviceId));
-      onShowToast("Device revoked");
-      await fetchAll();
-      onDeviceChange?.();
-    } catch (_e) {
-      onShowToast("Failed to revoke device — try again");
-    }
-    setConfirmingRevokeId(null);
-  }, [fetchAll, onDeviceChange, onShowToast]);
+  const revokeDevice = useCallback(
+    async (deviceId: string) => {
+      try {
+        await unwrap(commands.revokeDevice(deviceId));
+        onShowToast('Device revoked');
+        await fetchAll();
+        onDeviceChange?.();
+      } catch (_e) {
+        onShowToast('Failed to revoke device — try again');
+      }
+      setConfirmingRevokeId(null);
+    },
+    [fetchAll, onDeviceChange, onShowToast],
+  );
 
   // ── Nickname edit interaction ───────────────────────────
 
-  const startEdit = (device: Device) => {
+  const startEdit = useCallback((device: Device) => {
     setEditingDeviceId(device.id ?? null);
-    setEditValue(device.nickname || "");
+    setEditValue(device.nickname || '');
     setNicknameError(null);
-  };
+  }, []);
 
-  const cancelEdit = () => {
+  const cancelEdit = useCallback(() => {
     setEditingDeviceId(null);
-    setEditValue("");
+    setEditValue('');
     setNicknameError(null);
-  };
+  }, []);
 
-  const commitEdit = (deviceId: string) => {
-    const trimmed = editValue.trim();
-    if (trimmed) {
-      saveNickname(deviceId, trimmed);
-    } else {
-      cancelEdit();
-    }
-  };
+  const commitEdit = useCallback(
+    (deviceId: string) => {
+      const trimmed = editValue.trim();
+      if (trimmed) {
+        saveNickname(deviceId, trimmed);
+      } else {
+        cancelEdit();
+      }
+    },
+    [editValue, saveNickname, cancelEdit],
+  );
 
   // Focus input when editing starts
   useEffect(() => {
@@ -152,17 +177,17 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
   useEffect(() => {
     if (!confirmingRevokeId) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setConfirmingRevokeId(null);
-      if (e.key === "Enter") revokeDevice(confirmingRevokeId);
+      if (e.key === 'Escape') setConfirmingRevokeId(null);
+      if (e.key === 'Enter') revokeDevice(confirmingRevokeId);
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
   }, [confirmingRevokeId, revokeDevice]);
 
   const lastSeen = (device: Device): string => {
     return device.last_push_at
       ? formatTime(Math.floor(new Date(device.last_push_at).getTime() / 1000))
-      : "never";
+      : 'never';
   };
 
   // ── Loading state ───────────────────────────────────────
@@ -176,10 +201,38 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
         <div role="list" aria-label="Machines loading">
           {[0, 1, 2].map((i) => (
             <div key={i} role="listitem" style={S.skeletonRow}>
-              <div style={{ ...S.skeletonBlock, width: 8, height: 8, borderRadius: "50%" }} />
-              <div style={{ ...S.skeletonBlock, width: 8, height: 8, borderRadius: "50%" }} />
-              <div style={{ ...S.skeletonBlock, flex: 1, height: 14, borderRadius: 4 }} />
-              <div style={{ ...S.skeletonBlock, width: 32, height: 14, borderRadius: 4 }} />
+              <div
+                style={{
+                  ...S.skeletonBlock,
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                }}
+              />
+              <div
+                style={{
+                  ...S.skeletonBlock,
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                }}
+              />
+              <div
+                style={{
+                  ...S.skeletonBlock,
+                  flex: 1,
+                  height: 14,
+                  borderRadius: 4,
+                }}
+              />
+              <div
+                style={{
+                  ...S.skeletonBlock,
+                  width: 32,
+                  height: 14,
+                  borderRadius: 4,
+                }}
+              />
             </div>
           ))}
         </div>
@@ -198,7 +251,9 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
         </div>
         <div style={S.emptyState}>
           <div style={S.emptyHeading}>No machines yet</div>
-          <div style={S.emptyBody}>Pair a device to route clips between machines.</div>
+          <div style={S.emptyBody}>
+            Pair a device to route clips between machines.
+          </div>
           <code style={S.emptyCode}>cinch auth pair</code>
         </div>
       </div>
@@ -210,10 +265,12 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
 
   // The device being confirmed for revoke (needed for ConfirmDialog label)
   const confirmingDevice = confirmingRevokeId
-    ? devices.find(d => d.id === confirmingRevokeId)
+    ? devices.find((d) => d.id === confirmingRevokeId)
     : undefined;
   const confirmingDisplayName = confirmingDevice
-    ? (confirmingDevice.nickname || confirmingDevice.hostname || confirmingRevokeId)
+    ? confirmingDevice.nickname ||
+      confirmingDevice.hostname ||
+      confirmingRevokeId
     : confirmingRevokeId;
 
   // ── Machine grid ─────────────────────────────────────────
@@ -229,15 +286,15 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
 
       <div role="list" aria-label="Machines" style={S.grid}>
         {merged.map((entry) => {
-          if (entry.kind === "local") {
+          if (entry.kind === 'local') {
             return (
               <div key="local" role="listitem" style={S.card}>
                 <div style={S.cardHeader}>
                   <span
                     style={{
                       ...S.statusPill,
-                      background: "var(--surface-2)",
-                      color: "var(--text-primary)",
+                      background: 'var(--surface-2)',
+                      color: 'var(--text-primary)',
                     }}
                     aria-label="Online"
                   >
@@ -251,9 +308,9 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
             );
           }
 
-          if (entry.kind === "source_only") {
+          if (entry.kind === 'source_only') {
             const s = entry.source;
-            const name = s.source.replace(/^remote:/, "");
+            const name = s.source.replace(/^remote:/, '');
             const pillVars = sourcePillVars(s.source);
             return (
               <div key={s.source} role="listitem" style={S.card}>
@@ -261,7 +318,7 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
                   <span
                     style={{
                       ...S.statusPill,
-                      background: "var(--surface-2)",
+                      background: 'var(--surface-2)',
                       color: C.t3,
                     }}
                     aria-label="Unknown status"
@@ -279,9 +336,13 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
                   </span>
                 </div>
                 <div style={S.cardName}>{name}</div>
-                <div style={S.cardMeta}>{s.clip_count} clips · {formatTime(s.last_seen)}</div>
+                <div style={S.cardMeta}>
+                  {s.clip_count} clips · {formatTime(s.last_seen)}
+                </div>
                 <div style={S.cardFooter}>
-                  <span style={{ ...S.thisDeviceBadge, color: C.t4 }}>Not paired</span>
+                  <span style={{ ...S.thisDeviceBadge, color: C.t4 }}>
+                    Not paired
+                  </span>
                 </div>
               </div>
             );
@@ -291,8 +352,8 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
           const device = entry.device;
           const isCurrentDevice = device.id === currentDeviceID;
           const isEditing = editingDeviceId === device.id;
-          const displayName = device.nickname || device.hostname || "";
-          const pillVars = sourcePillVars(device.source_key ?? device.id ?? "");
+          const displayName = device.nickname || device.hostname || '';
+          const pillVars = sourcePillVars(device.source_key ?? device.id ?? '');
 
           return (
             <div key={device.id} role="listitem" style={S.card}>
@@ -300,12 +361,12 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
                 <span
                   style={{
                     ...S.statusPill,
-                    background: "var(--surface-2)",
-                    color: device.online ? "var(--text-primary)" : C.t3,
+                    background: 'var(--surface-2)',
+                    color: device.online ? 'var(--text-primary)' : C.t3,
                   }}
-                  aria-label={device.online ? "Online" : "Offline"}
+                  aria-label={device.online ? 'Online' : 'Offline'}
                 >
-                  {device.online ? "online" : "offline"}
+                  {device.online ? 'online' : 'offline'}
                 </span>
                 <span
                   style={{
@@ -314,7 +375,7 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
                     color: pillVars.fg,
                   }}
                 >
-                  {device.hostname ?? "unknown"}
+                  {device.hostname ?? 'unknown'}
                 </span>
                 {isCurrentDevice && (
                   <span style={S.thisDeviceBadge}>This device</span>
@@ -328,14 +389,22 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
                     style={{
                       ...S.nicknameInput,
                       opacity: savingNickname ? 0.5 : 1,
-                      pointerEvents: savingNickname ? "none" : "auto",
+                      pointerEvents: savingNickname ? 'none' : 'auto',
                     }}
                     value={editValue}
                     onChange={(e) => setEditValue(e.target.value)}
-                    onBlur={() => commitEdit(device.id ?? "")}
+                    onBlur={() => commitEdit(device.id!)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") { e.preventDefault(); commitEdit(device.id ?? ""); }
-                      if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
+                      // device.id is non-null here: input only renders when editingDeviceId === device.id,
+                      // and startEdit gates on device.id being truthy before setting editingDeviceId.
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        commitEdit(device.id!);
+                      }
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        cancelEdit();
+                      }
                     }}
                     maxLength={32}
                     spellCheck={false}
@@ -355,7 +424,9 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
                 )}
               </div>
 
-              <div style={S.cardMeta}>{device.clip_count ?? 0} clips · {lastSeen(device)}</div>
+              <div style={S.cardMeta}>
+                {device.clip_count ?? 0} clips · {lastSeen(device)}
+              </div>
 
               <div style={S.cardFooter}>
                 <button
@@ -385,8 +456,8 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
         title="Revoke device?"
         body={
           <>
-            Remove <strong>{confirmingDisplayName}</strong> from your account. It
-            will no longer sync clips.
+            Remove <strong>{confirmingDisplayName}</strong> from your account.
+            It will no longer sync clips.
           </>
         }
         primaryLabel={`Revoke "${confirmingDisplayName}"`}
@@ -405,71 +476,71 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
 
 const S: Record<string, React.CSSProperties> = {
   panel: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     flex: 1,
     minHeight: 0,
     background: C.bg,
   },
 
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "12px 16px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '12px 16px',
     borderBottom: `1px solid ${C.border}`,
     flexShrink: 0,
   },
   headerTitle: {
     fontSize: 13,
     fontWeight: 600,
-    textTransform: "uppercase",
-    letterSpacing: "0.08em",
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
     color: C.t2,
-    fontFamily: "Inter, system-ui, sans-serif",
+    fontFamily: 'Inter, system-ui, sans-serif',
   },
   headerCount: {
     fontSize: 12,
     fontWeight: 500,
     color: C.t3,
     fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-    fontVariantNumeric: "tabular-nums",
+    fontVariantNumeric: 'tabular-nums',
   },
 
   grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
     gap: 12,
     padding: 16,
-    overflowY: "auto",
+    overflowY: 'auto',
     flex: 1,
-    alignContent: "start",
+    alignContent: 'start',
   },
 
   card: {
     background: C.card,
     border: `1px solid ${C.border}`,
     borderRadius: 10,
-    padding: "12px 14px",
-    display: "flex",
-    flexDirection: "column",
+    padding: '12px 14px',
+    display: 'flex',
+    flexDirection: 'column',
     gap: 6,
   },
 
   cardHeader: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: 6,
-    flexWrap: "wrap",
+    flexWrap: 'wrap',
   },
 
   statusPill: {
-    padding: "1px 8px",
+    padding: '1px 8px',
     borderRadius: 9999,
     fontSize: 10,
-    fontFamily: "var(--font-mono)",
-    letterSpacing: "0.04em",
-    textTransform: "uppercase" as const,
+    fontFamily: 'var(--font-mono)',
+    letterSpacing: '0.04em',
+    textTransform: 'uppercase',
     flexShrink: 0,
     lineHeight: 1.6,
   },
@@ -477,12 +548,12 @@ const S: Record<string, React.CSSProperties> = {
   sourcePill: {
     fontSize: 11,
     fontWeight: 600,
-    padding: "2px 6px",
+    padding: '2px 6px',
     borderRadius: 4,
-    fontFamily: "Inter, system-ui, sans-serif",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
+    fontFamily: 'Inter, system-ui, sans-serif',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
     maxWidth: 120,
   },
 
@@ -491,15 +562,15 @@ const S: Record<string, React.CSSProperties> = {
     fontSize: 11,
     fontWeight: 600,
     color: C.t3,
-    padding: "2px 6px",
+    padding: '2px 6px',
     borderRadius: 4,
-    fontFamily: "Inter, system-ui, sans-serif",
-    whiteSpace: "nowrap",
+    fontFamily: 'Inter, system-ui, sans-serif',
+    whiteSpace: 'nowrap',
   },
 
   nameRow: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: 2,
   },
 
@@ -507,12 +578,12 @@ const S: Record<string, React.CSSProperties> = {
     fontSize: 17,
     fontWeight: 400,
     color: C.t1,
-    cursor: "pointer",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    fontFamily: "var(--font-serif)",
-    letterSpacing: "-0.02em",
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    fontFamily: 'var(--font-serif)',
+    letterSpacing: '-0.02em',
     lineHeight: 1.4,
   },
 
@@ -520,23 +591,23 @@ const S: Record<string, React.CSSProperties> = {
     fontSize: 17,
     fontWeight: 400,
     color: C.t1,
-    fontFamily: "var(--font-serif)",
-    letterSpacing: "-0.02em",
-    background: "transparent",
+    fontFamily: 'var(--font-serif)',
+    letterSpacing: '-0.02em',
+    background: 'transparent',
     border: `1px solid ${C.accent}`,
     borderRadius: 4,
-    padding: "2px 8px",
-    outline: "none",
+    padding: '2px 8px',
+    outline: 'none',
     boxShadow: `0 0 0 3px rgba(79,179,169,0.18)`,
     lineHeight: 1.4,
-    width: "100%",
-    boxSizing: "border-box" as const,
+    width: '100%',
+    boxSizing: 'border-box',
   },
 
   nicknameErrorText: {
     fontSize: 12,
     color: C.error,
-    fontFamily: "Inter, system-ui, sans-serif",
+    fontFamily: 'Inter, system-ui, sans-serif',
   },
 
   cardMeta: {
@@ -544,61 +615,61 @@ const S: Record<string, React.CSSProperties> = {
     fontWeight: 500,
     color: C.t3,
     fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-    fontVariantNumeric: "tabular-nums",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
+    fontVariantNumeric: 'tabular-nums',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
 
   cardFooter: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: 6,
     marginTop: 2,
   },
 
   revokeBtn: {
-    background: "transparent",
+    background: 'transparent',
     color: C.error,
-    border: "1px solid rgba(255,99,99,0.25)",
+    border: '1px solid rgba(255,99,99,0.25)',
     borderRadius: 6,
-    padding: "4px 8px",
+    padding: '4px 8px',
     fontSize: 12,
     fontWeight: 500,
-    cursor: "pointer",
-    fontFamily: "Inter, system-ui, sans-serif",
-    whiteSpace: "nowrap",
+    cursor: 'pointer',
+    fontFamily: 'Inter, system-ui, sans-serif',
+    whiteSpace: 'nowrap',
   },
 
   pairCard: {
-    background: "transparent",
+    background: 'transparent',
     border: `1px dashed ${C.border}`,
     borderRadius: 10,
-    padding: "12px 14px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    padding: '12px 14px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   pairCardInner: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: 4,
-    textAlign: "center",
+    textAlign: 'center',
   },
 
   pairHeading: {
     fontSize: 12,
     fontWeight: 600,
     color: C.t2,
-    fontFamily: "Inter, system-ui, sans-serif",
+    fontFamily: 'Inter, system-ui, sans-serif',
   },
 
   pairBody: {
     fontSize: 12,
     fontWeight: 500,
     color: C.t3,
-    fontFamily: "Inter, system-ui, sans-serif",
+    fontFamily: 'Inter, system-ui, sans-serif',
   },
 
   pairCode: {
@@ -608,22 +679,22 @@ const S: Record<string, React.CSSProperties> = {
   },
 
   emptyState: {
-    padding: "40px 20px",
-    textAlign: "center",
+    padding: '40px 20px',
+    textAlign: 'center',
   },
   emptyHeading: {
     fontSize: 13,
     fontWeight: 500,
     color: C.t2,
     marginBottom: 6,
-    fontFamily: "Inter, system-ui, sans-serif",
+    fontFamily: 'Inter, system-ui, sans-serif',
   },
   emptyBody: {
     fontSize: 12,
     fontWeight: 500,
     color: C.t3,
     marginBottom: 12,
-    fontFamily: "Inter, system-ui, sans-serif",
+    fontFamily: 'Inter, system-ui, sans-serif',
     lineHeight: 1.5,
   },
   emptyCode: {
@@ -633,10 +704,10 @@ const S: Record<string, React.CSSProperties> = {
   },
 
   skeletonRow: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: 8,
-    padding: "12px 16px",
+    padding: '12px 16px',
     minHeight: 44,
     borderBottom: `1px solid ${C.border}`,
   },
