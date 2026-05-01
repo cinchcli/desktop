@@ -497,13 +497,13 @@ const S: Record<string, React.CSSProperties> = {
     textTransform: 'uppercase',
     letterSpacing: '0.08em',
     color: C.t2,
-    fontFamily: 'Inter, system-ui, sans-serif',
+    fontFamily: 'var(--font-body)',
   },
   headerCount: {
     fontSize: 12,
     fontWeight: 500,
     color: C.t3,
-    fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+    fontFamily: 'var(--font-mono)',
     fontVariantNumeric: 'tabular-nums',
   },
 
@@ -550,7 +550,7 @@ const S: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     padding: '2px 6px',
     borderRadius: 4,
-    fontFamily: 'Inter, system-ui, sans-serif',
+    fontFamily: 'var(--font-body)',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -564,7 +564,7 @@ const S: Record<string, React.CSSProperties> = {
     color: C.t3,
     padding: '2px 6px',
     borderRadius: 4,
-    fontFamily: 'Inter, system-ui, sans-serif',
+    fontFamily: 'var(--font-body)',
     whiteSpace: 'nowrap',
   },
 
@@ -607,14 +607,14 @@ const S: Record<string, React.CSSProperties> = {
   nicknameErrorText: {
     fontSize: 12,
     color: C.error,
-    fontFamily: 'Inter, system-ui, sans-serif',
+    fontFamily: 'var(--font-body)',
   },
 
   cardMeta: {
     fontSize: 12,
     fontWeight: 500,
     color: C.t3,
-    fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+    fontFamily: 'var(--font-mono)',
     fontVariantNumeric: 'tabular-nums',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
@@ -637,7 +637,7 @@ const S: Record<string, React.CSSProperties> = {
     fontSize: 12,
     fontWeight: 500,
     cursor: 'pointer',
-    fontFamily: 'Inter, system-ui, sans-serif',
+    fontFamily: 'var(--font-body)',
     whiteSpace: 'nowrap',
   },
 
@@ -662,19 +662,19 @@ const S: Record<string, React.CSSProperties> = {
     fontSize: 12,
     fontWeight: 600,
     color: C.t2,
-    fontFamily: 'Inter, system-ui, sans-serif',
+    fontFamily: 'var(--font-body)',
   },
 
   pairBody: {
     fontSize: 12,
     fontWeight: 500,
     color: C.t3,
-    fontFamily: 'Inter, system-ui, sans-serif',
+    fontFamily: 'var(--font-body)',
   },
 
   pairCode: {
     fontSize: 12,
-    fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+    fontFamily: 'var(--font-mono)',
     color: C.t3,
   },
 
@@ -687,19 +687,19 @@ const S: Record<string, React.CSSProperties> = {
     fontWeight: 500,
     color: C.t2,
     marginBottom: 6,
-    fontFamily: 'Inter, system-ui, sans-serif',
+    fontFamily: 'var(--font-body)',
   },
   emptyBody: {
     fontSize: 12,
     fontWeight: 500,
     color: C.t3,
     marginBottom: 12,
-    fontFamily: 'Inter, system-ui, sans-serif',
+    fontFamily: 'var(--font-body)',
     lineHeight: 1.5,
   },
   emptyCode: {
     fontSize: 12,
-    fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+    fontFamily: 'var(--font-mono)',
     color: C.t3,
   },
 
