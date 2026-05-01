@@ -90,7 +90,6 @@ function App() {
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const [, setSourceSettings] = useState<Record<string, boolean>>({});
   const [devices, setDevices] = useState<Device[]>([]);
   const [newSourcePrompt, setNewSourcePrompt] = useState<string | null>(null);
   const [pinNoteDialog, setPinNoteDialog] = useState<{ clip: LocalClip } | null>(null);
@@ -146,17 +145,6 @@ function App() {
     }
   }, []);
 
-  const refreshSourceSettings = useCallback(async () => {
-    try {
-      const settings = await unwrap(commands.getAllSourceSettings());
-      const map: Record<string, boolean> = {};
-      for (const s of settings) map[s.source] = s.auto_copy;
-      setSourceSettings(map);
-    } catch (e) {
-      console.error(e);
-    }
-  }, []);
-
   const refreshDevices = useCallback(async () => {
     try {
       setDevices(await unwrap(commands.listDevices()));
@@ -167,7 +155,6 @@ function App() {
 
   const handleNewSourceResponse = async (source: string, enable: boolean) => {
     await unwrap(commands.setSourceAutoCopy(source, enable));
-    setSourceSettings((p) => ({ ...p, [source]: enable }));
     setNewSourcePrompt(null);
   };
 
@@ -176,11 +163,10 @@ function App() {
     const timer = setTimeout(() => {
       refreshClips();
       refreshSources();
-      refreshSourceSettings();
       refreshDevices();
     }, 1000);
     return () => clearTimeout(timer);
-  }, [auth.variant, refreshClips, refreshSources, refreshSourceSettings, refreshDevices]);
+  }, [auth.variant, refreshClips, refreshSources, refreshDevices]);
 
   useEffect(() => { refreshClips(); }, [refreshClips]);
 
@@ -199,11 +185,10 @@ function App() {
       events.clipDeleted.listen(() => { refreshClips(); refreshSources(); }),
       events.newSourceDetected.listen((e) => {
         setNewSourcePrompt(e.payload);
-        refreshSourceSettings();
       }),
     ];
     return () => { unsubs.forEach((p) => p.then((f) => f())); };
-  }, [refreshClips, refreshSources, refreshSourceSettings]);
+  }, [refreshClips, refreshSources]);
 
   const copyClip = useCallback((clip: LocalClip) => {
     if (clip.content_type === 'image' && clip.media_path) {
