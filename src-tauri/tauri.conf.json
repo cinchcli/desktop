@@ -13,13 +13,15 @@
 		"windows": [
 			{
 				"title": "Cinch",
-				"width": 900,
-				"height": 580,
+				"width": 960,
+				"height": 600,
+				"minWidth": 760,
+				"minHeight": 480,
 				"visible": false,
 				"decorations": false,
 				"transparent": true,
 				"shadow": true,
-				"resizable": false,
+				"resizable": true,
 				"backgroundColor": [0, 0, 0, 0]
 			}
 		],
