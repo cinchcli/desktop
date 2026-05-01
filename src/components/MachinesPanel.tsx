@@ -233,7 +233,16 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
             return (
               <div key="local" role="listitem" style={S.card}>
                 <div style={S.cardHeader}>
-                  <span style={{ ...S.statusDot, backgroundColor: C.success }} aria-label="Online" />
+                  <span
+                    style={{
+                      ...S.statusPill,
+                      background: "var(--surface-2)",
+                      color: "var(--text-primary)",
+                    }}
+                    aria-label="Online"
+                  >
+                    online
+                  </span>
                   <span style={S.thisDeviceBadge}>This device</span>
                 </div>
                 <div style={S.cardName}>This machine</div>
@@ -251,11 +260,14 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
                 <div style={S.cardHeader}>
                   <span
                     style={{
-                      ...S.statusDot,
-                      backgroundColor: C.t4,
+                      ...S.statusPill,
+                      background: "var(--surface-2)",
+                      color: C.t3,
                     }}
                     aria-label="Unknown status"
-                  />
+                  >
+                    offline
+                  </span>
                   <span
                     style={{
                       ...S.sourcePill,
@@ -287,11 +299,14 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
               <div style={S.cardHeader}>
                 <span
                   style={{
-                    ...S.statusDot,
-                    backgroundColor: device.online ? C.success : C.t4,
+                    ...S.statusPill,
+                    background: "var(--surface-2)",
+                    color: device.online ? "var(--text-primary)" : C.t3,
                   }}
                   aria-label={device.online ? "Online" : "Offline"}
-                />
+                >
+                  {device.online ? "online" : "offline"}
+                </span>
                 <span
                   style={{
                     ...S.sourcePill,
@@ -340,7 +355,7 @@ export function MachinesPanel({ currentDeviceID, onShowToast, onDeviceChange }: 
                 )}
               </div>
 
-              <div style={S.cardMeta}>{lastSeen(device)}</div>
+              <div style={S.cardMeta}>{device.clip_count ?? 0} clips · {lastSeen(device)}</div>
 
               <div style={S.cardFooter}>
                 <button
@@ -448,11 +463,15 @@ const S: Record<string, React.CSSProperties> = {
     flexWrap: "wrap",
   },
 
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: "50%",
+  statusPill: {
+    padding: "1px 8px",
+    borderRadius: 9999,
+    fontSize: 10,
+    fontFamily: "var(--font-mono)",
+    letterSpacing: "0.04em",
+    textTransform: "uppercase" as const,
     flexShrink: 0,
+    lineHeight: 1.6,
   },
 
   sourcePill: {
@@ -485,22 +504,24 @@ const S: Record<string, React.CSSProperties> = {
   },
 
   cardName: {
-    fontSize: 13,
-    fontWeight: 500,
+    fontSize: 17,
+    fontWeight: 400,
     color: C.t1,
     cursor: "pointer",
     whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
-    fontFamily: "Inter, system-ui, sans-serif",
+    fontFamily: "var(--font-serif)",
+    letterSpacing: "-0.02em",
     lineHeight: 1.4,
   },
 
   nicknameInput: {
-    fontSize: 13,
-    fontWeight: 500,
+    fontSize: 17,
+    fontWeight: 400,
     color: C.t1,
-    fontFamily: "Inter, system-ui, sans-serif",
+    fontFamily: "var(--font-serif)",
+    letterSpacing: "-0.02em",
     background: "transparent",
     border: `1px solid ${C.accent}`,
     borderRadius: 4,
@@ -550,7 +571,7 @@ const S: Record<string, React.CSSProperties> = {
   },
 
   pairCard: {
-    background: C.card2,
+    background: "transparent",
     border: `1px dashed ${C.border}`,
     borderRadius: 10,
     padding: "12px 14px",
