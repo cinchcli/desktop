@@ -1,55 +1,38 @@
-import { C } from "../design";
+import { sourcePillVars } from '../lib/sourceColor';
 
 interface SourcePillProps {
   source: string; // "local" | "remote:hostname"
-  status: "local" | "remote";
-  nickname?: string; // resolved from device list; undefined = use hostname
+  status: 'local' | 'remote';
+  nickname?: string;
 }
 
-export function SourcePill({ source, status, nickname }: SourcePillProps) {
-  const label = nickname ?? (source.startsWith("remote:")
-    ? source.replace("remote:", "")
+export function SourcePill({ source, nickname }: SourcePillProps) {
+  const label = nickname ?? (source.startsWith('remote:')
+    ? source.replace('remote:', '')
     : source);
 
-  // Dot color: local = accent, remote = muted text
-  const dotColor = status === "local" ? C.accent : C.t2;
+  const { bg, fg } = sourcePillVars(source);
 
   return (
     <span
       style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        background: C.card2,
-        borderRadius: 6,
-        padding: "2px 8px",
-        maxWidth: 120,
-        overflow: "hidden",
+        display: 'inline-flex',
+        alignItems: 'center',
+        background: bg,
+        color: fg,
+        borderRadius: 9999,
+        padding: '1px 8px',
+        maxWidth: 140,
+        overflow: 'hidden',
+        fontSize: 10,
+        fontFamily: 'var(--font-mono)',
+        letterSpacing: '0.04em',
+        whiteSpace: 'nowrap',
+        textOverflow: 'ellipsis',
+        flexShrink: 0,
       }}
     >
-      <span
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: "50%",
-          backgroundColor: dotColor,
-          flexShrink: 0,
-        }}
-      />
-      <span
-        style={{
-          fontSize: 14,
-          fontWeight: 500,
-          lineHeight: "1.14",
-          letterSpacing: "0.2px",
-          color: C.t2,
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}
-      >
-        {label}
-      </span>
+      {label}
     </span>
   );
 }
