@@ -137,7 +137,23 @@ export const IconClipboard = ({ size = 14, style }: IconProps) => (
 
 export const IconPin = ({ size = 14, style }: IconProps) => (
   <svg {...base(size)} style={style}>
-    <path d="M12 2l2.4 6H20l-5 3.6 1.9 6L12 14l-4.9 3.6L9 11.6 4 8h5.6L12 2z" />
+    <line x1="12" y1="17" x2="12" y2="22" />
+    <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
+  </svg>
+);
+
+export const IconInbox = ({ size = 14, style }: IconProps) => (
+  <svg {...base(size)} style={style}>
+    <path d="M22 13h-7l-2 3h-2l-2-3H2" />
+    <path d="M5.45 5.11L2 13v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-7.89A2 2 0 0 0 16.7 4H7.3a2 2 0 0 0-1.85 1.11Z" />
+  </svg>
+);
+
+export const IconMonitor = ({ size = 14, style }: IconProps) => (
+  <svg {...base(size)} style={style}>
+    <rect x="2" y="3" width="20" height="14" rx="2" />
+    <line x1="8" y1="21" x2="16" y2="21" />
+    <line x1="12" y1="17" x2="12" y2="21" />
   </svg>
 );
 
