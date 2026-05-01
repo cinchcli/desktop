@@ -44,7 +44,7 @@ export function ClipCard({ clip, selected, onCopy, onDelete, onClick, onDoubleCl
     borderRadius: 8,
     cursor: "pointer",
     transition: "border-color 150ms ease, background-color 150ms ease",
-    boxShadow: selected ? `inset 2px 0 0 ${C.accent}` : undefined,
+    boxShadow: selected ? `inset 2px 0 0 var(--selection-bar)` : undefined,
     position: "relative",
   };
 
@@ -136,7 +136,7 @@ export function ClipCard({ clip, selected, onCopy, onDelete, onClick, onDoubleCl
         {isText && (
           <div
             style={{
-              fontFamily: "Inter, system-ui, sans-serif",
+              fontFamily: 'var(--font-body)',
               fontSize: 16,
               fontWeight: 500,
               color: C.t1,
@@ -154,7 +154,7 @@ export function ClipCard({ clip, selected, onCopy, onDelete, onClick, onDoubleCl
         {isImage && (
           <>
             <div style={{
-              fontFamily: "Inter, system-ui, sans-serif",
+              fontFamily: 'var(--font-body)',
               fontSize: 14,
               fontWeight: 500,
               color: C.t1,
@@ -165,7 +165,7 @@ export function ClipCard({ clip, selected, onCopy, onDelete, onClick, onDoubleCl
               Image ({formatBytes(clip.byte_size)})
             </div>
             <div style={{
-              fontFamily: "Inter, system-ui, sans-serif",
+              fontFamily: 'var(--font-body)',
               fontSize: 12,
               fontWeight: 600,
               color: C.t2,
@@ -178,7 +178,7 @@ export function ClipCard({ clip, selected, onCopy, onDelete, onClick, onDoubleCl
         {isBinary && (
           <>
             <div style={{
-              fontFamily: "Inter, system-ui, sans-serif",
+              fontFamily: 'var(--font-body)',
               fontSize: 14,
               fontWeight: 500,
               color: C.t1,
@@ -189,7 +189,7 @@ export function ClipCard({ clip, selected, onCopy, onDelete, onClick, onDoubleCl
               {clip.label || clip.content_type}
             </div>
             <div style={{
-              fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, monospace",
+              fontFamily: 'var(--font-mono)',
               fontSize: 12,
               fontWeight: 600,
               color: C.t2,
@@ -206,7 +206,7 @@ export function ClipCard({ clip, selected, onCopy, onDelete, onClick, onDoubleCl
         <span
           data-testid="timestamp"
           style={{
-            fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, monospace",
+            fontFamily: 'var(--font-mono)',
             fontSize: 12,
             fontWeight: 600,
             color: C.t2,

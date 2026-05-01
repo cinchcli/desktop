@@ -125,8 +125,8 @@ export default function ConfirmDialog({
       cursor: "pointer",
     },
     primaryBtn: {
-      background: isDestructive ? C.error : C.accent,
-      color: isDestructive ? "#07080a" : C.accentOn,
+      background: isDestructive ? C.error : C.t1,
+      color: isDestructive ? "#07080a" : C.bg,
       border: "none",
       fontSize: 12,
       fontWeight: 600,

@@ -77,7 +77,7 @@ describe('ClipCard', () => {
       const timestamp = container.querySelector('[data-testid="timestamp"]');
       expect(timestamp).toBeInTheDocument();
       const style = timestamp!.getAttribute('style') || '';
-      expect(style).toContain('JetBrains Mono');
+      expect(style).toContain('var(--font-mono)');
       expect(style).toContain('tabular-nums');
     });
 
