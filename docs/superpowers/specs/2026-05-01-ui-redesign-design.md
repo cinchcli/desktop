@@ -32,7 +32,7 @@ Master-detail, three regions across:
 
 ```
 ┌─ traffic lights ────────────────────────────┐
-│ search bar (Lyon serif placeholder, ⌘F kbd) │
+│ search bar (sans placeholder, ⌘F kbd)       │
 ├──┬──────────────────┬───────────────────────┤
 │  │                  │                       │
 │ R│   Clip list      │     Clip detail       │
@@ -107,13 +107,15 @@ Today's `--accent: #4FB3A9` is dropped as a primary surface accent. Selection in
 |---|---|---|
 | Body, UI | SF Pro Display, system fallbacks (`-apple-system, system-ui`) | same |
 | Clip detail title (h1) | Lyon Text, then Newsreader, Georgia fallback. 22px, weight 400, line-height 1.2, letter-spacing -0.02em | same |
-| Search placeholder | Lyon Text, 15px, color = text-faint | same |
+| Search placeholder | SF Pro Display, 15px, weight 400, color = text-faint | same |
 | Section labels (Today / Yesterday) | SF Mono, 10px, uppercase, letter-spacing 0.08em, color = text-faint | same |
 | Source pills, timestamps, kbd | SF Mono, 9.5–10.5px depending on context, letter-spacing 0.04em | same |
 | Code block | SF Mono, 12px, line-height 1.6 | same |
 | Clip preview row | SF Pro Display, 13.5px, weight 400, letter-spacing -0.005em | same |
 
-**Inter is removed.** Today's `--font-body: 'Inter'` is replaced with `'SF Pro Display', '-apple-system', system-ui, sans-serif`. JetBrains Mono is replaced by SF Mono (system) for tabular text. Lyon Text is web-loaded for the clip title and search placeholder; Newsreader is a free fallback if Lyon is unlicensed.
+**Inter is removed.** Today's `--font-body: 'Inter'` is replaced with `'SF Pro Display', '-apple-system', system-ui, sans-serif`. JetBrains Mono is replaced by SF Mono (system) for tabular text. Lyon Text is web-loaded for the clip title (Newsreader is the free fallback if Lyon is unlicensed).
+
+*Search inputs use body sans-serif (`var(--font-body)`); the serif role is reserved for clip detail titles, auth-screen headings, settings section labels, machine card names, and empty-state headings.*
 
 Font feature settings (`'calt' 1, 'kern' 1, 'liga' 1, 'ss03' 1`) on Inter are dropped — SF Pro doesn't need them.
 
@@ -165,9 +167,9 @@ Today's `MetaRow` and `SourcePill` components are reused. The dialog-style sub-c
 ### 7.4 Search bar (top, full width)
 
 - 50px tall.
-- Lyon Text serif placeholder ("Search clips") — italic-feeling without italic.
+- Sans-serif placeholder ("Search clips") in body type — single line.
 - Right side: ⌘F kbd hint, theme toggle, settings gear (settings opens a sheet, not a separate panel).
-- `from:<nickname>` token search continues to work; no syntax change.
+- `from:<nickname>` token search continues to work; no syntax change. Plain text fuzzy-matches against clip content + device nickname (uFuzzy, frontend, over the most recent 500 clips).
 
 ### 7.5 Status bar (bottom, full width)
 
@@ -198,7 +200,7 @@ Existing `SettingsPane` is reskinned. Same content, new tokens. Retention slider
 
 ### 7.9 Auth states (LocalOnly, Authenticating, ErrorRecoverable)
 
-- `LocalOnlyView` adopts the new tokens but keeps the existing ClipCard/EmptyState/UpgradePrompt structure. Search bar uses Lyon serif placeholder.
+- `LocalOnlyView` adopts the new tokens but keeps the existing ClipCard/EmptyState/UpgradePrompt structure. Search bar uses the sans-serif placeholder shared with the dashboard.
 - `AuthLoadingScreen`: spinner color shifts from `--accent` to `--text-primary`. Title type changes to Lyon Text 20px.
 - `AuthErrorScreen`: same.
 
