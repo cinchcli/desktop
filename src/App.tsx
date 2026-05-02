@@ -4,6 +4,7 @@ import { commands, events } from './bindings';
 import type { LocalClip, SourceInfo, Device } from './bindings';
 import { unwrap } from './lib/tauri';
 import { buildTargets, fuzzySearch, parseFromToken } from './lib/fuzzy';
+import { groupByTimeBucket } from './lib/timeBuckets';
 import { C } from './design';
 import { useAuthState, retryAuth, type AuthProgress, type AuthErrorReason } from './state/auth';
 import SettingsPane from './SettingsPane';
@@ -211,6 +212,51 @@ function App() {
     showToast('Unpinned', 'trash');
   };
 
+  const totalClips = sources.reduce((sum, s) => sum + s.clip_count, 0);
+
+  // Parse from:<nickname> + residual fuzzy term
+  const parsed = useMemo(() => parseFromToken(debouncedQuery), [debouncedQuery]);
+
+  const sourceFilter = useMemo(() => {
+    if (!parsed.from) return null;
+    const nick = parsed.from.toLowerCase();
+    const matched = devices.find(
+      d => (d.nickname?.toLowerCase() === nick) || (d.hostname?.toLowerCase() === nick),
+    );
+    return matched ? matched.source_key : '__no_match__';
+  }, [parsed.from, devices]);
+
+  // Build source -> nickname map for SourcePill and from: filter
+  const nicknameBySource = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const d of devices) {
+      if (d.nickname && d.source_key) {
+        map[d.source_key] = d.nickname;
+      }
+    }
+    return map;
+  }, [devices]);
+
+  const filteredClips = useMemo(() => {
+    // 1. Apply source filter (from:<nickname>)
+    let pool = clips;
+    if (sourceFilter === '__no_match__') return [];
+    if (sourceFilter) pool = pool.filter(c => c.source === sourceFilter);
+
+    // 2. Fuzzy-rank the residual query against content + nickname
+    const targets = buildTargets(pool, nicknameBySource, activePanel === 'pinned');
+    return fuzzySearch(targets, parsed.residual);
+  }, [clips, sourceFilter, parsed.residual, nicknameBySource, activePanel]);
+
+  // Arrow-key nav must follow what the user sees. The inbox view groups
+  // by time bucket (Today → Yesterday → This week → Older), so flatten
+  // in that order for navigation. Pinned view groups by note in input
+  // order, which already matches `filteredClips`.
+  const navOrderClips = useMemo(() => {
+    if (activePanel === 'pinned') return filteredClips;
+    return groupByTimeBucket(filteredClips).flatMap((g) => g.items);
+  }, [filteredClips, activePanel]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
@@ -236,6 +282,23 @@ function App() {
       if ((e.metaKey || e.ctrlKey) && e.key === ',') {
         e.preventDefault();
         setShowSettings(v => !v);
+        return;
+      }
+      if (
+        e.key === 'Tab' &&
+        !e.metaKey && !e.ctrlKey && !e.altKey &&
+        !(e.target instanceof HTMLInputElement) &&
+        !(e.target instanceof HTMLTextAreaElement)
+      ) {
+        e.preventDefault();
+        const panels: RailPanel[] = ['inbox', 'pinned', 'machines'];
+        const idx = panels.indexOf(activePanel);
+        const next = e.shiftKey
+          ? (idx - 1 + panels.length) % panels.length
+          : (idx + 1) % panels.length;
+        setActivePanel(panels[next]);
+        setSelectedClip(null);
+        setSelectedSource(null);
         return;
       }
       if (selectedClip) {
@@ -273,54 +336,20 @@ function App() {
       const isDown = e.key === 'ArrowDown' || (e.ctrlKey && e.key === 'j');
       const isUp = e.key === 'ArrowUp' || (e.ctrlKey && e.key === 'k');
       if (isDown || isUp) {
-        if (clips.length === 0) return;
+        if (navOrderClips.length === 0) return;
         e.preventDefault();
-        const idx = selectedClip ? clips.findIndex((c) => c.id === selectedClip.id) : -1;
-        const next = isDown
-          ? Math.min(idx + 1, clips.length - 1)
-          : Math.max(idx - 1, 0);
-        setSelectedClip(clips[next]);
+        const idx = selectedClip ? navOrderClips.findIndex((c) => c.id === selectedClip.id) : -1;
+        const next = idx === -1
+          ? 0
+          : isDown
+            ? Math.min(idx + 1, navOrderClips.length - 1)
+            : Math.max(idx - 1, 0);
+        setSelectedClip(navOrderClips[next]);
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [searchQuery, selectedClip, clips, sources, selectedSource, copyClip, showShortcuts]);
-
-  const totalClips = sources.reduce((sum, s) => sum + s.clip_count, 0);
-
-  // Parse from:<nickname> + residual fuzzy term
-  const parsed = useMemo(() => parseFromToken(debouncedQuery), [debouncedQuery]);
-
-  const sourceFilter = useMemo(() => {
-    if (!parsed.from) return null;
-    const nick = parsed.from.toLowerCase();
-    const matched = devices.find(
-      d => (d.nickname?.toLowerCase() === nick) || (d.hostname?.toLowerCase() === nick),
-    );
-    return matched ? matched.source_key : '__no_match__';
-  }, [parsed.from, devices]);
-
-  // Build source -> nickname map for SourcePill and from: filter
-  const nicknameBySource = useMemo(() => {
-    const map: Record<string, string> = {};
-    for (const d of devices) {
-      if (d.nickname && d.source_key) {
-        map[d.source_key] = d.nickname;
-      }
-    }
-    return map;
-  }, [devices]);
-
-  const filteredClips = useMemo(() => {
-    // 1. Apply source filter (from:<nickname>)
-    let pool = clips;
-    if (sourceFilter === '__no_match__') return [];
-    if (sourceFilter) pool = pool.filter(c => c.source === sourceFilter);
-
-    // 2. Fuzzy-rank the residual query against content + nickname
-    const targets = buildTargets(pool, nicknameBySource, activePanel === 'pinned');
-    return fuzzySearch(targets, parsed.residual);
-  }, [clips, sourceFilter, parsed.residual, nicknameBySource, activePanel]);
+  }, [searchQuery, selectedClip, navOrderClips, sources, selectedSource, copyClip, showShortcuts, activePanel]);
 
   const currentDeviceID =
     auth.variant === 'Authenticated' ? auth.payload.device_id : '';
@@ -557,10 +586,9 @@ function AuthLoadingScreen({ progress }: { progress: AuthProgress }) {
       {/* Heading */}
       <span
         style={{
-          fontFamily: 'var(--font-serif)',
           fontSize: 22,
-          fontWeight: 400,
-          letterSpacing: '-0.02em',
+          fontWeight: 600,
+          letterSpacing: '-0.018em',
           color: C.t1,
         }}
       >
@@ -634,7 +662,7 @@ function AuthErrorScreen({
         fontFamily: 'inherit',
       }}
     >
-      <span style={{ fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 400, letterSpacing: '-0.02em', color: C.t1 }}>{label}</span>
+      <span style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.018em', color: C.t1 }}>{label}</span>
       {retryAfterMs !== null && (
         <span style={{ color: C.t3, fontSize: 14 }}>
           Auto-retry in {Math.round(retryAfterMs / 1000)}s
@@ -675,6 +703,8 @@ function ShortcutPanel({ onClose }: { onClose: () => void }) {
         { keys: ['↑', '↓'], label: 'Move between clips' },
         { keys: ['^J', '^K'], label: 'Move between clips (vim)' },
         { keys: ['^H', '^L'], label: 'Cycle source filter' },
+        { keys: ['⇥'], label: 'Next panel (Inbox → Pinned → Machines)' },
+        { keys: ['⇧⇥'], label: 'Previous panel' },
       ],
     },
     {

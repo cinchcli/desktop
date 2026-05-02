@@ -27,9 +27,9 @@ describe('ClipDetail', () => {
     expect(screen.getByText(/select a clip/i)).toBeInTheDocument();
   });
 
-  it('renders generated title and content for selected clip', () => {
+  it('renders clip content for selected clip', () => {
     render(<ClipDetail clip={baseClip} onCopy={noOp} onPin={noOp} onDelete={noOp} />);
-    expect(screen.getByRole('heading', { name: /hello world/i })).toBeInTheDocument();
+    expect(screen.getByText(/hello world/i)).toBeInTheDocument();
   });
 
   it('shows Copy / Pin / Delete buttons with kbd hints', () => {

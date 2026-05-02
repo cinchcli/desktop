@@ -262,12 +262,6 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
       letterSpacing: "0.2px",
       color: C.t1,
     },
-    subtitle: {
-      fontSize: 16,
-      fontWeight: 500,
-      color: C.t2,
-      marginBottom: 28,
-    },
     closeBtn: {
       width: 28,
       height: 28,
@@ -289,17 +283,17 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
       margin: "24px 0",
     },
     clearSectionHeader: {
-      fontFamily: 'var(--font-serif)',
-      fontSize: 17,
-      fontWeight: 400,
-      letterSpacing: '-0.02em',
+      fontSize: 15,
+      fontWeight: 600,
+      letterSpacing: '-0.012em',
       color: C.t1,
       marginBottom: 12,
     },
     clearDescription: {
-      fontSize: 16,
+      fontSize: 14,
       fontWeight: 500,
-      lineHeight: 1.6,
+      lineHeight: 1.55,
+      letterSpacing: '-0.005em',
       color: C.t2,
       marginBottom: 16,
     },
@@ -400,7 +394,7 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
         {activeTab === "servers" && (
           <>
             {/* Relay Server */}
-            <div style={{ fontFamily: 'var(--font-serif)', fontSize: 17, fontWeight: 400, letterSpacing: '-0.02em', color: C.t1, marginBottom: 10 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.012em', color: C.t1, marginBottom: 10 }}>
               Relay server
             </div>
             {auth.variant === "Authenticated" ? (
@@ -440,7 +434,7 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
             )}
 
             {/* Remote Machines */}
-            <div style={{ fontFamily: 'var(--font-serif)', fontSize: 17, fontWeight: 400, letterSpacing: '-0.02em', color: C.t1, marginBottom: 10 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.012em', color: C.t1, marginBottom: 10 }}>
               Remote machines
             </div>
             <MachinesPanel
@@ -525,7 +519,7 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
 
             <div style={styles.section}>
               <div style={{
-                fontFamily: 'var(--font-serif)', fontSize: 17, fontWeight: 400, letterSpacing: '-0.02em', color: C.t1,
+                fontSize: 15, fontWeight: 600, letterSpacing: '-0.012em', color: C.t1,
                 marginBottom: 4,
               }}>
                 Global shortcut
@@ -542,7 +536,7 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
                   borderRadius: 8,
                   padding: "7px 10px",
                   color: C.t1,
-                  fontSize: 16,
+                  fontSize: 14,
                   fontWeight: 500,
                   fontFamily: "inherit",
                   outline: "none",

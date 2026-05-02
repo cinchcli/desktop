@@ -119,11 +119,10 @@ const S: Record<string, CSSProperties> = {
     overflowY: 'auto',
   },
   sectionLabel: {
-    padding: '14px 18px 6px',
-    fontFamily: 'var(--font-serif)',
-    fontSize: 12,
-    fontWeight: 400,
-    letterSpacing: '-0.01em',
+    padding: '16px 18px 8px',
+    fontSize: 11,
+    fontWeight: 600,
+    letterSpacing: '-0.005em',
     color: C.t2,
   },
   row: {
@@ -132,12 +131,10 @@ const S: Record<string, CSSProperties> = {
     flexDirection: 'column',
     gap: 4,
     cursor: 'pointer',
-    borderLeft: '2px solid transparent',
     borderBottom: `1px solid ${C.border}`,
   },
   rowActive: {
     background: C.selected,
-    borderLeftColor: 'var(--selection-bar)',
   },
   preview: {
     fontSize: 13.5,
