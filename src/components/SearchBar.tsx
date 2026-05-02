@@ -71,7 +71,7 @@ const S: Record<string, CSSProperties> = {
     background: 'transparent',
     border: 'none',
     outline: 'none',
-    fontFamily: 'var(--font-serif)',
+    fontFamily: 'var(--font-body)',
     fontSize: 15,
     fontWeight: 400,
     letterSpacing: '-0.01em',
