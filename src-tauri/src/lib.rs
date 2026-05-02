@@ -55,6 +55,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::auth::sign_out,
             commands::auth::retry_auth,
             commands::auth::handle_deeplink,
+            commands::auth::pair_via_ssh,
             commands::relays::pair_with_token,
         ])
         .events(collect_events![
@@ -67,6 +68,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             events::ImageDownloadComplete,
             events::AuthAdoptedFromCli,
             events::CliHandoffRequested,
+            events::SshPairMarkerFound,
         ])
 }
 

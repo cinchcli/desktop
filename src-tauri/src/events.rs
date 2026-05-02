@@ -42,3 +42,12 @@ pub struct AuthAdoptedFromCli {
 pub struct CliHandoffRequested {
     pub relay_url: String,
 }
+
+/// Fired by `pair_via_ssh` when the remote machine's `cinch auth login
+/// --headless` emits the device-code marker. The frontend opens `url`
+/// in a browser so the user can complete OAuth; the command keeps running
+/// until the SSH process exits.
+#[derive(Clone, Serialize, Deserialize, Type, Event)]
+pub struct SshPairMarkerFound {
+    pub url: String,
+}

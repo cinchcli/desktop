@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use tauri::{AppHandle, Manager, State};
+use tauri_specta::Event;
 
 use crate::auth::{
     add_relay_profile, load_multi_config, transition, wipe_credentials, AuthState, AuthStateHandle,
@@ -492,4 +493,132 @@ pub async fn retry_auth(app: AppHandle, handle: State<'_, AuthStateHandle>) -> R
     // Conservative v1: just transition to LocalOnly; React re-renders SetupScreen.
     transition(&app, &handle, AuthState::LocalOnly);
     Ok(())
+}
+
+/// pair_via_ssh — SSH into a remote machine, install cinch, and run
+/// `cinch auth login --headless` so the remote authenticates independently.
+///
+/// When the remote emits the `<<CINCH-DEVICE-CODE>>` marker, this command
+/// fires a `SshPairMarkerFound` event carrying the verification URL so the
+/// frontend can open the browser. The command then blocks until the SSH
+/// process exits (i.e., until the remote device completes OAuth and
+/// registers its public key with the relay).
+#[tauri::command]
+#[specta::specta]
+pub async fn pair_via_ssh(
+    app: AppHandle,
+    target: String,
+    relay_url: Option<String>,
+    skip_install: bool,
+) -> Result<(), String> {
+    use std::process::Stdio;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::process::Command as TokioCommand;
+
+    let cfg = client_core::auth::load_config().map_err(|e| e.to_string())?;
+    let remote_relay = relay_url.unwrap_or_else(|| cfg.relay_url.clone());
+    let script = build_pair_script(&remote_relay, skip_install);
+
+    let mut child = TokioCommand::new("ssh")
+        .arg(&target)
+        .arg("sh")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("SSH spawn failed: {}", e))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(script.as_bytes())
+            .await
+            .map_err(|e| format!("Writing script: {}", e))?;
+    }
+
+    if let Some(stdout) = child.stdout.take() {
+        let mut lines = BufReader::new(stdout).lines();
+        while let Some(line) = lines
+            .next_line()
+            .await
+            .map_err(|e| format!("Reading output: {}", e))?
+        {
+            if let Some(marker) = client_core::auth::parse_device_code_marker(&line) {
+                crate::events::SshPairMarkerFound { url: marker.url }
+                    .emit(&app)
+                    .ok();
+            }
+        }
+    }
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| format!("SSH wait: {}", e))?;
+    if !status.success() {
+        return Err(format!(
+            "Remote setup failed (exit {})",
+            status.code().unwrap_or(-1)
+        ));
+    }
+    Ok(())
+}
+
+fn build_pair_script(relay_url: &str, skip_install: bool) -> String {
+    let mut s = String::new();
+    s.push_str("#!/bin/sh\nset -e\n\n");
+    s.push_str(&format!("RELAY_URL='{}'\n\n", relay_url));
+
+    if !skip_install {
+        s.push_str(
+            r#"echo "Installing cinch..."
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+  if command -v sudo >/dev/null 2>&1; then
+    SUDO="sudo"
+  fi
+fi
+curl -fsSL https://cinchcli.com/install.sh | $SUDO sh -s cinch
+if ! command -v cinch >/dev/null 2>&1; then
+  echo "Error: cinch installation failed." >&2
+  exit 1
+fi
+echo ""
+"#,
+        );
+    } else {
+        s.push_str(
+            r#"if ! command -v cinch >/dev/null 2>&1; then
+  echo "Error: cinch not found. Remove skip_install or install manually." >&2
+  exit 1
+fi
+"#,
+        );
+    }
+
+    s.push_str(
+        r#"CINCH_DIR="$HOME/.cinch"
+CINCH_CONFIG="$CINCH_DIR/config.json"
+mkdir -p "$CINCH_DIR"
+if [ -f "$CINCH_CONFIG" ] && [ -s "$CINCH_CONFIG" ] && command -v jq >/dev/null 2>&1; then
+  jq --arg url "$RELAY_URL" '. + {relay_url: $url}' "$CINCH_CONFIG" > "$CINCH_CONFIG.tmp" && mv "$CINCH_CONFIG.tmp" "$CINCH_CONFIG" || printf '{"relay_url":"%s"}\n' "$RELAY_URL" > "$CINCH_CONFIG"
+elif [ -f "$CINCH_CONFIG" ] && [ -s "$CINCH_CONFIG" ] && command -v python3 >/dev/null 2>&1; then
+  python3 - "$RELAY_URL" "$CINCH_CONFIG" << 'PYEOF' || printf '{"relay_url":"%s"}\n' "$RELAY_URL" > "$CINCH_CONFIG"
+import json, sys
+url = sys.argv[1]
+path = sys.argv[2]
+with open(path) as f: cfg = json.load(f)
+cfg['relay_url'] = url
+with open(path, 'w') as f: json.dump(cfg, f, indent=2)
+PYEOF
+else
+  printf '{"relay_url":"%s"}\n' "$RELAY_URL" > "$CINCH_CONFIG"
+fi
+chmod 600 "$CINCH_CONFIG"
+
+echo "Authenticating with relay at $RELAY_URL..."
+cinch auth login --headless --relay-url "$RELAY_URL"
+"#,
+    );
+
+    s
 }
