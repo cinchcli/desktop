@@ -5,6 +5,7 @@ import { C, formatTime } from '../design';
 import { sourcePillVars } from '../lib/sourceColor';
 import type { Device, SourceInfo } from '../bindings';
 import ConfirmDialog from '../ConfirmDialog';
+import { AddSshMachineDialog } from './AddSshMachineDialog';
 
 // ─── Props ────────────────────────────────────────────────
 
@@ -38,6 +39,7 @@ export function MachinesPanel({
     null,
   );
   const [nicknameError, setNicknameError] = useState<string | null>(null);
+  const [showSshDialog, setShowSshDialog] = useState(false);
   const nicknameErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
 
@@ -440,15 +442,29 @@ export function MachinesPanel({
           );
         })}
 
-        {/* Pair card — always shown at end of grid */}
-        <div style={S.pairCard} role="listitem">
+        {/* Pair card — opens SSH pairing wizard */}
+        <button
+          style={S.pairCard}
+          role="listitem"
+          onClick={() => setShowSshDialog(true)}
+          aria-label="Add machine via SSH"
+        >
           <div style={S.pairCardInner}>
-            <div style={S.pairHeading}>Pair a machine</div>
-            <div style={S.pairBody}>Run on another machine:</div>
-            <code style={S.pairCode}>cinch auth pair</code>
+            <div style={S.pairHeading}>Add via SSH</div>
+            <div style={S.pairBody}>Pair a remote machine over SSH</div>
           </div>
-        </div>
+        </button>
       </div>
+
+      {showSshDialog && (
+        <AddSshMachineDialog
+          onClose={() => {
+            setShowSshDialog(false);
+            fetchAll();
+          }}
+          onShowToast={onShowToast}
+        />
+      )}
 
       {/* Revoke confirm dialog */}
       <ConfirmDialog
@@ -647,6 +663,9 @@ const S: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    cursor: 'pointer',
+    width: '100%',
+    boxSizing: 'border-box',
   },
 
   pairCardInner: {
@@ -659,7 +678,7 @@ const S: Record<string, React.CSSProperties> = {
   pairHeading: {
     fontSize: 12,
     fontWeight: 600,
-    color: C.t2,
+    color: C.accent,
     fontFamily: 'var(--font-body)',
   },
 
@@ -668,12 +687,6 @@ const S: Record<string, React.CSSProperties> = {
     fontWeight: 500,
     color: C.t3,
     fontFamily: 'var(--font-body)',
-  },
-
-  pairCode: {
-    fontSize: 12,
-    fontFamily: 'var(--font-mono)',
-    color: C.t3,
   },
 
   emptyState: {
