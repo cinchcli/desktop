@@ -45,13 +45,12 @@ export function EmptyState({ variant, query }: EmptyStateProps) {
       <div
         data-testid="empty-heading"
         style={{
-          fontFamily: 'var(--font-serif)',
-          fontSize: 22,
-          fontWeight: 400,
+          fontSize: 19,
+          fontWeight: 600,
           color: C.t1,
           textWrap: "balance",
-          lineHeight: 1.6,
-          letterSpacing: '-0.02em',
+          lineHeight: 1.3,
+          letterSpacing: '-0.014em',
         }}
       >
         {headingMap[variant]}
@@ -60,13 +59,12 @@ export function EmptyState({ variant, query }: EmptyStateProps) {
       <div
         data-testid="empty-body"
         style={{
-          fontFamily: 'var(--font-body)',
-          fontSize: 16,
+          fontSize: 14,
           fontWeight: 500,
           color: C.t2,
           textWrap: "balance",
-          lineHeight: 1.15,
-          letterSpacing: "0.1px",
+          lineHeight: 1.5,
+          letterSpacing: "-0.005em",
           marginTop: 8,
         }}
       >

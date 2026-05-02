@@ -102,10 +102,11 @@ const S: Record<string, CSSProperties> = {
   sectionLabel: {
     padding: '14px 18px 6px',
     fontFamily: 'var(--font-mono)',
-    fontSize: 10,
+    fontSize: 11,
+    fontWeight: 600,
     letterSpacing: '0.08em',
     textTransform: 'uppercase',
-    color: C.t3,
+    color: C.t2,
   },
   row: {
     padding: '11px 18px',
@@ -113,12 +114,10 @@ const S: Record<string, CSSProperties> = {
     flexDirection: 'column',
     gap: 4,
     cursor: 'pointer',
-    borderLeft: '2px solid transparent',
     borderBottom: `1px solid ${C.border}`,
   },
   rowActive: {
     background: C.selected,
-    borderLeftColor: 'var(--selection-bar)',
   },
   preview: {
     fontSize: 13.5,

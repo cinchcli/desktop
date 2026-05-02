@@ -2,10 +2,10 @@
 
 /* Dark theme — default */
 :root {
-  /* Typography */
-  --font-body: 'SF Pro Display', -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', sans-serif;
-  --font-mono: 'SF Mono', ui-monospace, Menlo, Monaco, monospace;
-  --font-serif: 'Newsreader', 'Lyon Text', Georgia, 'Times New Roman', serif;
+  /* Typography — Geist (single family, weight+tracking does the hierarchy) */
+  --font-body: 'Geist Variable', 'Geist', -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Geist Mono', ui-monospace, 'SF Mono', Menlo, Monaco, monospace;
+  --font-display: var(--font-body);
 
   /* Surfaces — Dark Editorial (cream-tinted dark) */
   --bg:         #16140F;
@@ -20,10 +20,10 @@
   --border:       rgba(237, 230, 214, 0.08);
   --border-hover: rgba(237, 230, 214, 0.12);
 
-  /* Text */
+  /* Text — muted bumped from #9C9486 → #A8A092 for AA contrast on dark cream-tinted bg */
   --text-primary: #EDE6D6;
-  --text-muted:   #9C9486;
-  --text-faint:   #6A6357;
+  --text-muted:   #A8A092;
+  --text-faint:   #6F6759;
   --text-vfaint:  #3F3B33;
 
   /* Selection bar (left edge of selected row, active rail item) */
@@ -64,7 +64,7 @@
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
-  --radius-xl: 10px;
+  --radius-xl: 14px;
 
   color-scheme: dark;
 }
