@@ -3,6 +3,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { commands, events } from './bindings';
 import type { LocalClip, SourceInfo, Device } from './bindings';
 import { unwrap } from './lib/tauri';
+import { buildTargets, fuzzySearch, parseFromToken } from './lib/fuzzy';
 import { C } from './design';
 import { useAuthState, retryAuth, type AuthProgress, type AuthErrorReason } from './state/auth';
 import SettingsPane from './SettingsPane';
@@ -116,26 +117,15 @@ function App() {
     try {
       if (activePanel === 'pinned') {
         const pinned = await unwrap(commands.listPinnedClips());
-        const q = debouncedQuery.trim().toLowerCase();
-        setClips(q
-          ? pinned.filter(
-              c => c.content.toLowerCase().includes(q) || c.pin_note?.toLowerCase().includes(q),
-            )
-          : pinned);
+        setClips(pinned);
         return;
       }
-      if (debouncedQuery.trim()) {
-        const results = await unwrap(commands.searchClips(debouncedQuery, 100));
-        const filtered = selectedSource ? results.filter((c) => c.source === selectedSource) : results;
-        setClips(filtered);
-      } else {
-        const results = await unwrap(commands.listClips(selectedSource, null, 100));
-        setClips(results);
-      }
+      const results = await unwrap(commands.listClips(selectedSource, null, 500));
+      setClips(results);
     } catch (e) {
       console.error('failed to load clips:', e);
     }
-  }, [activePanel, debouncedQuery, selectedSource]);
+  }, [activePanel, selectedSource]);
 
   const refreshSources = useCallback(async () => {
     try {
@@ -298,24 +288,17 @@ function App() {
 
   const totalClips = sources.reduce((sum, s) => sum + s.clip_count, 0);
 
-  // from: token parsing for device-scoped clip filtering (T3-04)
-  const fromMatch = searchQuery.match(/from:(\S+)/i);
-  const sourceFilterToken = fromMatch ? fromMatch[1] : null;
+  // Parse from:<nickname> + residual fuzzy term
+  const parsed = useMemo(() => parseFromToken(debouncedQuery), [debouncedQuery]);
+
   const sourceFilter = useMemo(() => {
-    if (!sourceFilterToken) return null;
-    const nick = sourceFilterToken.toLowerCase();
+    if (!parsed.from) return null;
+    const nick = parsed.from.toLowerCase();
     const matched = devices.find(
-      d => (d.nickname?.toLowerCase() === nick) || (d.hostname?.toLowerCase() === nick)
+      d => (d.nickname?.toLowerCase() === nick) || (d.hostname?.toLowerCase() === nick),
     );
     return matched ? matched.source_key : '__no_match__';
-  }, [sourceFilterToken, devices]);
-
-  // Apply from: filter to clip list
-  const filteredClips = useMemo(() => {
-    if (!sourceFilter) return clips;
-    if (sourceFilter === '__no_match__') return [];
-    return clips.filter(c => c.source === sourceFilter);
-  }, [clips, sourceFilter]);
+  }, [parsed.from, devices]);
 
   // Build source -> nickname map for SourcePill and from: filter
   const nicknameBySource = useMemo(() => {
@@ -327,6 +310,17 @@ function App() {
     }
     return map;
   }, [devices]);
+
+  const filteredClips = useMemo(() => {
+    // 1. Apply source filter (from:<nickname>)
+    let pool = clips;
+    if (sourceFilter === '__no_match__') return [];
+    if (sourceFilter) pool = pool.filter(c => c.source === sourceFilter);
+
+    // 2. Fuzzy-rank the residual query against content + nickname
+    const targets = buildTargets(pool, nicknameBySource, activePanel === 'pinned');
+    return fuzzySearch(targets, parsed.residual);
+  }, [clips, sourceFilter, parsed.residual, nicknameBySource, activePanel]);
 
   const currentDeviceID =
     auth.variant === 'Authenticated' ? auth.payload.device_id : '';
