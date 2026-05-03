@@ -12,9 +12,19 @@ vi.mock('./state/auth', () => ({
     retryAuth: vi.fn(),
 }));
 
-// Mock @tauri-apps/api/core and event at module scope since App.tsx imports them.
+// Mock Tauri APIs that are not available in the jsdom test environment.
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
+vi.mock('@tauri-apps/api/dpi', () => ({
+    LogicalSize: vi.fn().mockImplementation((w: number, h: number) => ({ width: w, height: h })),
+}));
+vi.mock('@tauri-apps/api/window', () => ({
+    getCurrentWindow: vi.fn(() => ({
+        startDragging: vi.fn(),
+        hide: vi.fn(),
+        setSize: vi.fn(() => Promise.resolve()),
+    })),
+}));
 
 describe('App', () => {
     beforeEach(() => {

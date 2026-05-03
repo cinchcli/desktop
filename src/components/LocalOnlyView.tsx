@@ -72,6 +72,7 @@ export function LocalOnlyView({ theme, toggleTheme, onOpenSettings }: LocalOnlyV
   const [selectedClip, setSelectedClip] = useState<LocalClip | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [activeFilter, setActiveFilter] = useState<"all" | "text" | "image" | "code" | "url">("all");
   const [loading, setLoading] = useState(true);
   const [upgradePromptDismissed, setUpgradePromptDismissed] = useState(false);
   const [toast, setToast] = useState<{ message: string; icon: "copy" | "trash" } | null>(null);
@@ -94,43 +95,37 @@ export function LocalOnlyView({ theme, toggleTheme, onOpenSettings }: LocalOnlyV
     toastTimer.current = setTimeout(() => setToast(null), 1800);
   }, []);
 
-  // ─── Content-type filter shortcuts ───────────────────
-  // Typing "image", "text", "url", etc. filters by content_type
-  // instead of running FTS search.
-
-  const TYPE_FILTERS: Record<string, (ct: string) => boolean> = {
-    image:  (ct) => ct === "image",
-    text:   (ct) => ct === "text",
-    json:   (ct) => ct === "json",
-    url:    (ct) => ct === "url",
-    code:   (ct) => ct === "code",
-    binary: (ct) => !["text", "json", "code", "url", "image", "error"].includes(ct),
-  };
-
   // ─── Clip list logic ──────────────────────────────────
 
   const refreshClips = useCallback(async () => {
     try {
-      const q = debouncedQuery.trim().toLowerCase();
-      const typeFilter = TYPE_FILTERS[q];
+      const q = debouncedQuery.trim();
+      let results: LocalClip[];
 
-      if (typeFilter) {
-        // Content-type shortcut: fetch all, filter client-side
-        const all = await unwrap(commands.listClips(null, null, 500));
-        setClips(all.filter((c) => typeFilter(c.content_type)));
-      } else if (q) {
-        const results = await unwrap(commands.searchClips(debouncedQuery, 100));
-        setClips(results);
+      if (q) {
+        results = await unwrap(commands.searchClips(q, 500));
       } else {
-        const results = await unwrap(commands.listClips(null, null, 100));
-        setClips(results);
+        results = await unwrap(commands.listClips(null, null, 500));
       }
+
+      if (activeFilter !== "all") {
+        const filterMap: Record<string, string[]> = {
+          text:  ["text", "json"],
+          image: ["image"],
+          code:  ["code"],
+          url:   ["url"],
+        };
+        const allowed = filterMap[activeFilter] ?? [];
+        results = results.filter((c) => allowed.includes(c.content_type));
+      }
+
+      setClips(results);
     } catch (e) {
       console.error("failed to load clips:", e);
     } finally {
       setLoading(false);
     }
-  }, [debouncedQuery]);
+  }, [debouncedQuery, activeFilter]);
 
   // Initial load
   useEffect(() => {
@@ -220,13 +215,6 @@ export function LocalOnlyView({ theme, toggleTheme, onOpenSettings }: LocalOnlyV
         return;
       }
 
-      // Cmd+Backspace: delete selected clip
-      if (selectedClip && meta && e.key === "Backspace") {
-        e.preventDefault();
-        handleDelete(selectedClip.id);
-        return;
-      }
-
       // Cmd+C: copy selected clip content if no text selection
       if (selectedClip && meta && e.key === "c" && !e.shiftKey) {
         if (!window.getSelection()?.toString()) {
@@ -296,6 +284,24 @@ export function LocalOnlyView({ theme, toggleTheme, onOpenSettings }: LocalOnlyV
         >
           <IconGear size={13} />
         </button>
+      </div>
+
+      {/* Filter row */}
+      <div style={S.filterRow}>
+        {(["all", "text", "image", "code", "url"] as const).map((f) => (
+          <button
+            key={f}
+            style={{
+              ...S.pill,
+              ...(activeFilter === f ? S.pillActive : {}),
+            }}
+            onClick={() => setActiveFilter(f)}
+            aria-pressed={activeFilter === f}
+          >
+            <span style={{ ...S.pillDot, ...S[`dot_${f}`] }} />
+            {f}
+          </button>
+        ))}
       </div>
 
       {/* Middle: scrollable clip list area */}
@@ -401,6 +407,50 @@ const S: Record<string, CSSProperties> = {
     overflowY: "auto",
     background: C.bg,
   },
+  filterRow: {
+    display: "flex",
+    alignItems: "center",
+    height: 36,
+    padding: "0 14px",
+    gap: 5,
+    background: C.card,
+    borderBottom: `1px solid ${C.border}`,
+    flexShrink: 0,
+    overflowX: "auto",
+  },
+  pill: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    padding: "2px 9px",
+    borderRadius: 20,
+    border: `1px solid ${C.border}`,
+    background: "transparent",
+    color: C.t3,
+    fontFamily: "var(--font-mono)",
+    fontSize: 10,
+    letterSpacing: "0.03em",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+  },
+  pillActive: {
+    background: C.card2,
+    borderColor: C.borderHover,
+    color: C.t1,
+  },
+  pillDot: {
+    width: 5,
+    height: 5,
+    borderRadius: "50%",
+    background: "currentColor",
+    flexShrink: 0,
+  },
+  dot_all:   { background: C.t3 },
+  dot_text:  { background: "var(--info)" },
+  dot_image: { background: "var(--success)" },
+  dot_code:  { background: "var(--warning)" },
+  dot_url:   { background: "var(--accent)" },
   toast: {
     position: "fixed",
     bottom: 56,
