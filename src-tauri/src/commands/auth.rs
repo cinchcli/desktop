@@ -380,8 +380,7 @@ pub async fn handle_deeplink(
         // Peek first (don't consume) so a junk cold-start link cannot drain the state
         // before the legitimate callback is processed.
         let pending_relay_url = pending_auth.peek();
-        if let Err(reason) =
-            crate::validate_auth_callback(pending_relay_url.as_deref(), &relay_url)
+        if let Err(reason) = crate::validate_auth_callback(pending_relay_url.as_deref(), &relay_url)
         {
             log::warn!("handle_deeplink: rejected deep-link: {}", reason);
             return Ok(());
