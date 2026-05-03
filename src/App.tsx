@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { LogicalSize } from '@tauri-apps/api/dpi';
 import { commands, events } from './bindings';
 import type { LocalClip, SourceInfo, Device } from './bindings';
 import { unwrap } from './lib/tauri';
@@ -72,8 +73,22 @@ function handleWindowDrag(e: React.MouseEvent) {
   }
 }
 
+const WINDOW_PRESETS = {
+  compact:  { width: 760,  height: 480 },
+  standard: { width: 960,  height: 600 },
+  spacious: { width: 1120, height: 720 },
+} as const;
+
 function App() {
   const { theme, toggle: toggleTheme } = useTheme();
+
+  useEffect(() => {
+    const saved = localStorage.getItem('cinch-window-size') as keyof typeof WINDOW_PRESETS | null;
+    const preset = saved && saved in WINDOW_PRESETS ? saved : 'standard';
+    const { width, height } = WINDOW_PRESETS[preset];
+    void getCurrentWindow().setSize(new LogicalSize(width, height));
+  }, []);
+
   const auth = useAuthState();
   // CLI handoff (cinch://login from `cinch auth login`). Shown above all
   // auth-state branches so the dialog opens regardless of LocalOnly /
@@ -98,6 +113,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [activePanel, setActivePanel] = useState<RailPanel>('inbox');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'text' | 'image' | 'code' | 'url'>('all');
   const searchRef = useRef<HTMLInputElement>(null);
   const clipListRef = useRef<HTMLDivElement>(null);
   const [toast, setToast] = useState<{ message: string; icon: 'copy' | 'trash' } | null>(null);
@@ -189,6 +205,7 @@ function App() {
       unwrap(commands.copyClipToClipboard(clip.content));
       showToast('Copied to clipboard', 'copy');
     }
+    void getCurrentWindow().hide();
   }, [showToast]);
 
   const handleDelete = async (id: string) => {
@@ -248,14 +265,26 @@ function App() {
     return fuzzySearch(targets, parsed.residual);
   }, [clips, sourceFilter, parsed.residual, nicknameBySource, activePanel]);
 
+  const typeFilteredClips = useMemo(() => {
+    if (activeFilter === 'all') return filteredClips;
+    const filterMap: Record<string, string[]> = {
+      text:  ['text', 'json'],
+      image: ['image'],
+      code:  ['code'],
+      url:   ['url'],
+    };
+    const allowed = filterMap[activeFilter] ?? [];
+    return filteredClips.filter((c) => allowed.includes(c.content_type));
+  }, [filteredClips, activeFilter]);
+
   // Arrow-key nav must follow what the user sees. The inbox view groups
   // by time bucket (Today → Yesterday → This week → Older), so flatten
   // in that order for navigation. Pinned view groups by note in input
   // order, which already matches `filteredClips`.
   const navOrderClips = useMemo(() => {
     if (activePanel === 'pinned') return filteredClips;
-    return groupByTimeBucket(filteredClips).flatMap((g) => g.items);
-  }, [filteredClips, activePanel]);
+    return groupByTimeBucket(typeFilteredClips).flatMap((g) => g.items);
+  }, [filteredClips, typeFilteredClips, activePanel]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -302,13 +331,9 @@ function App() {
         return;
       }
       if (selectedClip) {
-        if (e.key === 'Enter' && !(e.target instanceof HTMLInputElement)) {
+        if (e.key === 'Enter' && (!(e.target instanceof HTMLInputElement) || e.target === searchRef.current)) {
           e.preventDefault();
           copyClip(selectedClip);
-        }
-        if ((e.metaKey || e.ctrlKey) && e.key === 'Backspace') {
-          e.preventDefault();
-          handleDelete(selectedClip.id);
         }
         if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
           if (!window.getSelection()?.toString()) copyClip(selectedClip);
@@ -354,11 +379,6 @@ function App() {
   const currentDeviceID =
     auth.variant === 'Authenticated' ? auth.payload.device_id : '';
 
-  // Settings overlay — lifted above auth checks so it works in all auth states
-  const settingsOverlay = showSettings ? (
-    <SettingsPane onClose={() => { setShowSettings(false); if (auth.variant === 'Authenticated') refreshDevices(); }} clipCount={totalClips} />
-  ) : null;
-
   const handoffDialog = handoffRelay !== null ? (
     <AddRelayDialog
       onClose={() => setHandoffRelay(null)}
@@ -366,6 +386,18 @@ function App() {
       fromCli
     />
   ) : null;
+
+  if (showSettings) {
+    return (
+      <>
+        <SettingsPane
+          onClose={() => { setShowSettings(false); if (auth.variant === 'Authenticated') refreshDevices(); }}
+          clipCount={totalClips}
+        />
+        {handoffDialog}
+      </>
+    );
+  }
 
   if (auth.variant === 'LocalOnly') {
     return (
@@ -375,7 +407,6 @@ function App() {
           toggleTheme={toggleTheme}
           onOpenSettings={() => setShowSettings(true)}
         />
-        {settingsOverlay}
         {handoffDialog}
         <AdoptedAuthToast />
       </>
@@ -406,6 +437,22 @@ function App() {
         onMouseDown={handleWindowDrag}
       />
 
+      {activePanel === 'inbox' && (
+        <div style={S.filterRow}>
+          {(['all', 'text', 'image', 'code', 'url'] as const).map((f) => (
+            <button
+              key={f}
+              style={{ ...S.pill, ...(activeFilter === f ? S.pillActive : {}) }}
+              onClick={() => setActiveFilter(f)}
+              aria-pressed={activeFilter === f}
+            >
+              <span style={{ ...S.pillDot, ...S[`dot_${f}`] }} />
+              {f}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div style={S.body}>
         <Rail
           active={activePanel}
@@ -413,6 +460,7 @@ function App() {
             setActivePanel(panel);
             setSelectedClip(null);
             setSelectedSource(null);
+            setActiveFilter('all');
           }}
           onOpenSettings={() => setShowSettings(true)}
         />
@@ -440,7 +488,7 @@ function App() {
           <>
             <ClipList
               ref={clipListRef}
-              clips={filteredClips}
+              clips={typeFilteredClips}
               selected={selectedClip}
               onSelect={setSelectedClip}
               onCopy={copyClip}
@@ -452,6 +500,7 @@ function App() {
               onCopy={copyClip}
               onPin={(c) => c.is_pinned ? handleUnpin(c) : setPinNoteDialog({ clip: c })}
               onDelete={(c) => handleDelete(c.id)}
+              searchQuery={debouncedQuery}
             />
           </>
         )}
@@ -464,7 +513,6 @@ function App() {
         hints={selectedClip
           ? [
               { keys: '↵', label: 'copy' },
-              { keys: '⌘⌫', label: 'delete' },
               { keys: '?', label: 'shortcuts' },
             ]
           : [
@@ -498,7 +546,6 @@ function App() {
         />
       )}
 
-      {settingsOverlay}
       {showShortcuts && <ShortcutPanel onClose={() => setShowShortcuts(false)} />}
       {toast && <Toast message={toast.message} icon={toast.icon} />}
       <AdoptedAuthToast />
@@ -712,7 +759,6 @@ function ShortcutPanel({ onClose }: { onClose: () => void }) {
       rows: [
         { keys: ['↵'], label: 'Copy selected clip' },
         { keys: ['⌘C'], label: 'Copy selected clip' },
-        { keys: ['⌘⌫'], label: 'Delete selected clip' },
         { keys: ['⌘P'], label: 'Pin / unpin selected clip' },
       ],
     },
@@ -910,6 +956,50 @@ const S: Record<string, React.CSSProperties> = {
     minHeight: 0,
     overflow: 'hidden',
   },
+  filterRow: {
+    display: 'flex',
+    alignItems: 'center',
+    height: 36,
+    padding: '0 14px',
+    gap: 5,
+    background: C.card,
+    borderBottom: `1px solid ${C.border}`,
+    flexShrink: 0,
+    overflowX: 'auto',
+  },
+  pill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
+    padding: '2px 9px',
+    borderRadius: 20,
+    border: `1px solid ${C.border}`,
+    background: 'transparent',
+    color: C.t3,
+    fontFamily: 'var(--font-mono)',
+    fontSize: 10,
+    letterSpacing: '0.03em',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+  },
+  pillActive: {
+    background: C.card2,
+    borderColor: C.borderHover,
+    color: C.t1,
+  },
+  pillDot: {
+    width: 5,
+    height: 5,
+    borderRadius: '50%',
+    background: 'currentColor',
+    flexShrink: 0,
+  },
+  dot_all:   { background: C.t3 },
+  dot_text:  { background: 'var(--info)' },
+  dot_image: { background: 'var(--success)' },
+  dot_code:  { background: 'var(--warning)' },
+  dot_url:   { background: 'var(--accent)' },
 };
 
 export default App;

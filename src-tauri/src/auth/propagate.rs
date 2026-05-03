@@ -124,8 +124,7 @@ pub fn spawn_credential_watcher(
                 } else {
                     cfg.user_id.clone()
                 };
-                if let Err(e) =
-                    (crate::events::AuthAdoptedFromCli { user_short }).emit(&app_clone)
+                if let Err(e) = (crate::events::AuthAdoptedFromCli { user_short }).emit(&app_clone)
                 {
                     warn!("emit AuthAdoptedFromCli failed: {}", e);
                 }

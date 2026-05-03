@@ -11,6 +11,7 @@ import { commands } from "./bindings";
 import type { RetentionConfig } from "./bindings";
 import { unwrap } from "./lib/tauri";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { LogicalSize } from "@tauri-apps/api/dpi";
 import { C } from "./design";
 import { IconX } from "./icons";
 import ConfirmDialog from "./ConfirmDialog";
@@ -18,6 +19,18 @@ import RetentionSlider from "./RetentionSlider";
 import { AddRelayDialog } from "./components/AddRelayDialog";
 import { MachinesPanel } from "./components/MachinesPanel";
 import { useAuthState, signOut } from "./state/auth";
+
+const WINDOW_PRESETS = {
+  compact:  { label: "Compact",  width: 760,  height: 480 },
+  standard: { label: "Standard", width: 960,  height: 600 },
+  spacious: { label: "Spacious", width: 1120, height: 720 },
+} as const;
+type WindowPreset = keyof typeof WINDOW_PRESETS;
+
+function resolveWindowPreset(): WindowPreset {
+  const saved = localStorage.getItem("cinch-window-size");
+  return (saved && saved in WINDOW_PRESETS ? saved : "standard") as WindowPreset;
+}
 
 interface SettingsPaneProps {
   onClose: () => void;
@@ -66,6 +79,15 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
   const [saveError, setSaveError] = useState<string | null>(null);
   const [closeHovered, setCloseHovered] = useState(false);
   const [destructiveHovered, setDestructiveHovered] = useState(false);
+
+  const [windowPreset, setWindowPreset] = useState<WindowPreset>(resolveWindowPreset);
+
+  async function applyWindowPreset(preset: WindowPreset) {
+    const { width, height } = WINDOW_PRESETS[preset];
+    await getCurrentWindow().setSize(new LogicalSize(width, height));
+    localStorage.setItem("cinch-window-size", preset);
+    setWindowPreset(preset);
+  }
 
   // Global shortcut state (D-08)
   const [currentShortcut, setCurrentShortcut] = useState<string>("CmdOrCtrl+Shift+W");
@@ -228,26 +250,29 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
   };
 
   const styles: Record<string, CSSProperties> = {
-    overlay: {
-      position: "fixed",
-      inset: 0,
-      background: "rgba(0,0,0,0.55)",
-      zIndex: 100,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    pane: {
+    page: {
       background: C.bg,
       color: C.t1,
-      width: "100%",
-      maxWidth: 540,
-      maxHeight: "calc(100vh - 64px)",
-      overflowY: "auto",
-      padding: "32px 40px",
-      borderRadius: 12,
+      height: "100vh",
+      display: "flex",
+      flexDirection: "column",
+      borderRadius: "var(--radius-xl)",
       border: `1px solid var(--border)`,
-      position: "relative",
+      overflow: "hidden",
+    },
+    header: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      padding: "12px 16px",
+      borderBottom: `1px solid ${C.border}`,
+      flexShrink: 0,
+    },
+    pane: {
+      flex: 1,
+      minHeight: 0,
+      overflowY: "auto",
+      padding: "28px 40px",
     },
     titleRow: {
       display: "flex",
@@ -257,9 +282,9 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
       marginBottom: 4,
     },
     title: {
-      fontSize: 20,
-      fontWeight: 500,
-      letterSpacing: "0.2px",
+      fontSize: 13,
+      fontWeight: 600,
+      letterSpacing: "0.1px",
       color: C.t1,
     },
     closeBtn: {
@@ -336,34 +361,23 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
   };
 
   return (
-    <div
-      style={styles.overlay}
-      onClick={onClose}
-      role="presentation"
-    >
-      <div
-        style={styles.pane}
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-      >
-        <div style={styles.titleRow}>
-          <div>
-            <h1 id={titleId} style={styles.title}>Settings</h1>
-          </div>
-          <button
-            style={styles.closeBtn}
-            onClick={onClose}
-            onMouseEnter={() => setCloseHovered(true)}
-            onMouseLeave={() => setCloseHovered(false)}
-            aria-label="Close settings"
-            type="button"
-          >
-            <IconX size={14} />
-          </button>
-        </div>
+    <div style={styles.page} role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      {/* Header bar */}
+      <div style={styles.header}>
+        <button
+          style={styles.closeBtn}
+          onClick={onClose}
+          onMouseEnter={() => setCloseHovered(true)}
+          onMouseLeave={() => setCloseHovered(false)}
+          aria-label="Back"
+          type="button"
+        >
+          <IconX size={14} />
+        </button>
+        <h1 id={titleId} style={styles.title}>Settings</h1>
+      </div>
 
+      <div style={styles.pane}>
         {/* Tab bar */}
         <div style={{ display: "flex", gap: 4, marginBottom: 24, borderBottom: `1px solid ${C.border}`, paddingBottom: 0 }}>
           {(["general", "servers"] as const).map((tab) => (
@@ -560,6 +574,43 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
               )}
             </div>
 
+            <hr style={styles.sectionDivider} />
+
+            <div style={styles.section}>
+              <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.012em', color: C.t1, marginBottom: 4 }}>
+                Window size
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 500, color: C.t3, marginBottom: 12 }}>
+                Choose a preset size
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {(Object.keys(WINDOW_PRESETS) as WindowPreset[]).map((key) => {
+                  const active = windowPreset === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => void applyWindowPreset(key)}
+                      style={{
+                        background: active ? C.t1 : "transparent",
+                        color: active ? C.bg : C.t2,
+                        border: `1px solid ${active ? C.t1 : C.border}`,
+                        borderRadius: 6,
+                        padding: "6px 14px",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        letterSpacing: "0.2px",
+                        transition: "background 120ms, color 120ms",
+                      }}
+                    >
+                      {WINDOW_PRESETS[key].label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {saveError && <div style={styles.errorRegion}>{saveError}</div>}
           </>
         )}
@@ -608,3 +659,4 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
     </div>
   );
 }
+

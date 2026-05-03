@@ -83,6 +83,17 @@ export const commands = {
 	 */
 	handleDeeplink: (url: string) => typedError<null, string>(__TAURI_INVOKE("handle_deeplink", { url })),
 	/**
+	 *  pair_via_ssh — SSH into a remote machine, install cinch, and run
+	 *  `cinch auth login --headless` so the remote authenticates independently.
+	 * 
+	 *  When the remote emits the `<<CINCH-DEVICE-CODE>>` marker, this command
+	 *  fires a `SshPairMarkerFound` event carrying the verification URL so the
+	 *  frontend can open the browser. The command then blocks until the SSH
+	 *  process exits (i.e., until the remote device completes OAuth and
+	 *  registers its public key with the relay).
+	 */
+	pairViaSsh: (target: string, relayUrl: string | null, skipInstall: boolean) => typedError<null, string>(__TAURI_INVOKE("pair_via_ssh", { target, relayUrl, skipInstall })),
+	/**
 	 *  Pair with a relay using a master token obtained from `cinch auth login`.
 	 *  Clears any existing relay and replaces it with the new one.
 	 */
@@ -99,6 +110,7 @@ export const events = {
 	imageDownloadComplete: makeEvent<ImageDownloadComplete>("image-download-complete"),
 	imageDownloadFailed: makeEvent<ImageDownloadFailed>("image-download-failed"),
 	newSourceDetected: makeEvent<NewSourceDetected>("new-source-detected"),
+	sshPairMarkerFound: makeEvent<SshPairMarkerFound>("ssh-pair-marker-found"),
 	wsStatus: makeEvent<WsStatus>("ws-status"),
 };
 
@@ -219,6 +231,16 @@ export type SourceInfo = {
 export type SourceSetting = {
 	source: string,
 	auto_copy: boolean,
+};
+
+/**
+ *  Fired by `pair_via_ssh` when the remote machine's `cinch auth login
+ *  --headless` emits the device-code marker. The frontend opens `url`
+ *  in a browser so the user can complete OAuth; the command keeps running
+ *  until the SSH process exits.
+ */
+export type SshPairMarkerFound = {
+	url: string,
 };
 
 export type WsStatus = string;
