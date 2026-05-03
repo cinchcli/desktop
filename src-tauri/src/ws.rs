@@ -480,7 +480,6 @@ async fn handle_text_message(
             };
             info!("key exchange requested for device {}", device_id);
 
-            // Load our encryption key
             let cfg = match crate::auth::credential::load_config() {
                 Ok(c) => c,
                 Err(e) => {
@@ -495,9 +494,6 @@ async fn handle_text_message(
                     return;
                 }
             };
-
-            // Fetch the new device's public key from relay
-            let relay_url = cfg.relay_url.clone();
             let token = match crate::auth::credential::read_credentials(&cfg) {
                 Ok(t) => t,
                 Err(e) => {
@@ -505,47 +501,41 @@ async fn handle_text_message(
                     return;
                 }
             };
-            let dev_id = device_id.clone();
-            // Capture the WS-message fingerprint for later verification inside the async block.
             let ws_fp = msg.device_key_fingerprint.clone().unwrap_or_default();
+            let dev_id = device_id.clone();
 
             tauri::async_runtime::spawn(async move {
-                // GET /devices to find the device's public key
-                let client = reqwest::Client::new();
-                let resp = client
-                    .get(format!("{}/devices", relay_url))
-                    .header("Authorization", format!("Bearer {}", token))
-                    .send()
-                    .await;
-
-                let devices: Vec<serde_json::Value> = match resp {
-                    Ok(r) if r.status().is_success() => r.json().await.unwrap_or_default(),
-                    _ => {
-                        error!("failed to fetch devices for key exchange");
+                let client = match client_core::http::RestClient::new(cfg.relay_url.clone(), token)
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        error!("key exchange: cannot build client: {}", e);
                         return;
                     }
                 };
 
-                // Find the target device's public key
-                let device_pub_key = devices
+                let devices = match client.list_devices().await {
+                    Ok(d) => d,
+                    Err(e) => {
+                        error!("key exchange: list_devices failed: {}", e);
+                        return;
+                    }
+                };
+                let device_pub = match devices
                     .iter()
-                    .find(|d| d.get("id").and_then(|v| v.as_str()) == Some(&dev_id))
-                    .and_then(|d| d.get("public_key"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-
-                let device_pub = match device_pub_key {
-                    Some(pk) if !pk.is_empty() => pk,
-                    _ => {
+                    .find(|d| d.id == dev_id)
+                    .map(|d| d.public_key.clone())
+                    .filter(|pk| !pk.is_empty())
+                {
+                    Some(pk) => pk,
+                    None => {
                         error!("device {} has no public key", dev_id);
                         return;
                     }
                 };
 
-                // Verify fingerprint: compute SHA-256 of the fetched public key bytes and
-                // compare against the fingerprint delivered in the WS message.
-                // If the relay or a MitM substituted a different public key the hashes will
-                // not match and we abort the key exchange to protect the user encryption key.
+                // Verify fingerprint from WS message matches the fetched public key.
+                // A mismatch means the relay or a MitM substituted a different key.
                 if !ws_fp.is_empty() {
                     use base64::Engine;
                     use sha2::Digest;
@@ -559,67 +549,33 @@ async fn handle_text_message(
                             if fetched_fp != ws_fp {
                                 error!(
                                     "key_exchange_requested: fingerprint mismatch \
-                                     (ws={} fetched={}) — aborting key exchange",
+                                     (ws={} fetched={}) — aborting",
                                     ws_fp, fetched_fp
                                 );
                                 return;
                             }
                         }
                         Err(e) => {
-                            error!(
-                                "key_exchange_requested: cannot decode public key for \
-                                 fingerprint check: {} — aborting",
-                                e
-                            );
+                            error!("key_exchange_requested: cannot decode pubkey for fp check: {} — aborting", e);
                             return;
                         }
                     }
                 }
 
-                // Generate ephemeral keypair for ECDH
-                let (eph_priv_b64, eph_pub_b64) = crate::crypto::generate_ephemeral_keypair();
+                use base64::Engine;
+                let user_key_b64 =
+                    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&user_key);
 
-                // Derive shared key via ECDH
-                let aes_key = match crate::crypto::derive_shared_key(&eph_priv_b64, &device_pub) {
-                    Ok(k) => k,
-                    Err(e) => {
-                        error!("ECDH failed: {}", e);
-                        return;
-                    }
-                };
-
-                // Encrypt user_key with derived AES key
-                let encrypted_bundle = match crate::crypto::encrypt(&aes_key, &user_key) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        error!("encrypt user_key failed: {}", e);
-                        return;
-                    }
-                };
-
-                // POST /auth/key-bundle to relay
-                let bundle_body = serde_json::json!({
-                    "device_id": dev_id,
-                    "ephemeral_public_key": eph_pub_b64,
-                    "encrypted_bundle": encrypted_bundle,
-                });
-
-                match client
-                    .post(format!("{}/auth/key-bundle", relay_url))
-                    .header("Authorization", format!("Bearer {}", token))
-                    .json(&bundle_body)
-                    .send()
-                    .await
+                match client_core::key_exchange::respond(
+                    &client,
+                    &dev_id,
+                    &device_pub,
+                    &user_key_b64,
+                )
+                .await
                 {
-                    Ok(r) if r.status().is_success() => {
-                        info!("key bundle posted for device {}", dev_id);
-                    }
-                    Ok(r) => {
-                        error!("key bundle POST failed: HTTP {}", r.status());
-                    }
-                    Err(e) => {
-                        error!("key bundle POST failed: {}", e);
-                    }
+                    Ok(()) => info!("key bundle posted for device {}", dev_id),
+                    Err(e) => error!("key exchange failed: {}", e),
                 }
             });
         }

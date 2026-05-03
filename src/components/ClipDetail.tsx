@@ -1,7 +1,8 @@
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import type { LocalClip } from '../bindings';
 import { C, formatBytes } from '../design';
+import { parseFromToken } from '../lib/fuzzy';
 import { SourcePill } from './SourcePill';
 
 interface ClipDetailProps {
@@ -9,9 +10,10 @@ interface ClipDetailProps {
   onCopy: (clip: LocalClip) => void;
   onPin: (clip: LocalClip) => void;
   onDelete: (clip: LocalClip) => void;
+  searchQuery?: string;
 }
 
-export function ClipDetail({ clip, onCopy, onPin, onDelete }: ClipDetailProps) {
+export function ClipDetail({ clip, onCopy, onPin, onDelete, searchQuery }: ClipDetailProps) {
   const [imgDims, setImgDims] = useState<{ w: number; h: number } | null>(null);
   useEffect(() => { setImgDims(null); }, [clip?.id]);
 
@@ -28,6 +30,7 @@ export function ClipDetail({ clip, onCopy, onPin, onDelete }: ClipDetailProps) {
   // stays in mono so structure-bearing whitespace and punctuation read correctly.
   const isProse = !isJsonish && clip.content_type === 'text';
   const body = isJsonish ? tryPrettyJson(clip.content) : clip.content;
+  const highlightQuery = parseFromToken(searchQuery ?? '').residual;
 
   const stamp = new Date(clip.created_at * 1000).toLocaleString(undefined, {
     month: 'short', day: 'numeric', year: 'numeric',
@@ -59,9 +62,9 @@ export function ClipDetail({ clip, onCopy, onPin, onDelete }: ClipDetailProps) {
       ) : (
         <div style={S.scrollArea}>
           {isProse ? (
-            <div style={S.prose}>{body}</div>
+            <div style={S.prose}>{highlightText(body, highlightQuery)}</div>
           ) : (
-            <pre style={S.code}>{body}</pre>
+            <pre style={S.code}>{highlightText(body, highlightQuery)}</pre>
           )}
         </div>
       )}
@@ -106,6 +109,16 @@ function MetaRow({ label, value }: { label: string; value: string }) {
 
 function tryPrettyJson(s: string): string {
   try { return JSON.stringify(JSON.parse(s), null, 2); } catch { return s; }
+}
+
+function highlightText(text: string, query: string): ReactNode {
+  if (!query) return text;
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const parts = text.split(new RegExp(`(${escaped})`, 'gi'));
+  if (parts.length <= 1) return text;
+  return parts.map((part, i) =>
+    i % 2 === 1 ? <mark key={i} style={S.highlight}>{part}</mark> : part
+  );
 }
 
 const S: Record<string, CSSProperties> = {
@@ -250,4 +263,10 @@ const S: Record<string, CSSProperties> = {
     margin: 0,
   },
   metaVal: { color: C.t1, margin: 0, wordBreak: 'break-all' },
+  highlight: {
+    background: 'rgba(255, 193, 7, 0.35)',
+    borderRadius: 2,
+    padding: '0 1px',
+    color: 'inherit',
+  },
 };

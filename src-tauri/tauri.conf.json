@@ -16,13 +16,11 @@
 				"title": "Cinch",
 				"width": 960,
 				"height": 600,
-				"minWidth": 760,
-				"minHeight": 480,
 				"visible": false,
 				"decorations": false,
 				"transparent": true,
 				"shadow": true,
-				"resizable": true,
+				"resizable": false,
 				"backgroundColor": [0, 0, 0, 0]
 			}
 		],

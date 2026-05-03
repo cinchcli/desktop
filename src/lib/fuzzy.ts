@@ -45,15 +45,62 @@ const fuzz = new uFuzzy({
   intraIns: 1,  // one skipped char per term (fzf-lite)
 });
 
+// Raycast-style priority tiers
+const enum MatchPriority {
+  ContentPrefix = 0,   // content starts with query
+  ContentWordStart = 1, // any word in content starts with query
+  ContentContains = 2,  // content contains query (substring)
+  HaystackContains = 3, // other fields (nickname/source/note) contain query
+  FuzzyOnly = 4,        // fuzzy match only
+}
+
+function scoreTarget(contentLower: string, haystackLower: string, lower: string): MatchPriority {
+  if (contentLower.startsWith(lower)) return MatchPriority.ContentPrefix;
+  if (contentLower.split(/\s+/).some((w) => w.startsWith(lower))) return MatchPriority.ContentWordStart;
+  if (contentLower.includes(lower)) return MatchPriority.ContentContains;
+  if (haystackLower.includes(lower)) return MatchPriority.HaystackContains;
+  return MatchPriority.FuzzyOnly;
+}
+
 export function fuzzySearch(targets: FuzzyTarget[], query: string): LocalClip[] {
   const trimmed = query.trim();
   if (!trimmed) return targets.map((t) => t.clip);
 
+  const lower = trimmed.toLowerCase();
   const haystacks = targets.map((t) => t.haystack);
-  const idxs = fuzz.filter(haystacks, trimmed);
-  if (!idxs || idxs.length === 0) return [];
 
-  const info = fuzz.info(idxs, haystacks, trimmed);
-  const order = fuzz.sort(info, haystacks, trimmed);
-  return order.map((rank) => targets[info.idx[rank]].clip);
+  // Get fuzzy-ranked indices (preserves ufuzzy relevance ordering)
+  const rawIdxs = fuzz.filter(haystacks, trimmed);
+  const fuzzyRankedIdxs: number[] = rawIdxs
+    ? (() => {
+        const info = fuzz.info(rawIdxs, haystacks, trimmed);
+        const order = fuzz.sort(info, haystacks, trimmed);
+        return order.map((rank) => info.idx[rank]);
+      })()
+    : [];
+
+  // Map idx → fuzzy rank for stable secondary sort
+  const fuzzyRankMap = new Map<number, number>();
+  fuzzyRankedIdxs.forEach((idx, pos) => fuzzyRankMap.set(idx, pos));
+
+  // Include substring matches that fuzzy might have missed
+  haystacks.forEach((h, i) => {
+    if (!fuzzyRankMap.has(i) && h.toLowerCase().includes(lower)) {
+      fuzzyRankMap.set(i, fuzzyRankedIdxs.length + i);
+    }
+  });
+
+  if (fuzzyRankMap.size === 0) return [];
+
+  // Score and re-rank with Raycast-style priority
+  const scored = Array.from(fuzzyRankMap.entries()).map(([idx, fuzzyRank]) => {
+    const contentLower = targets[idx].clip.content.toLowerCase();
+    const haystackLower = haystacks[idx].toLowerCase();
+    return { idx, priority: scoreTarget(contentLower, haystackLower, lower), fuzzyRank };
+  });
+
+  // Primary: priority tier — Secondary: original fuzzy rank (preserves ufuzzy order within tier)
+  scored.sort((a, b) => a.priority - b.priority || a.fuzzyRank - b.fuzzyRank);
+
+  return scored.map(({ idx }) => targets[idx].clip);
 }

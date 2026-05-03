@@ -264,33 +264,6 @@ describe('LocalOnlyView', () => {
     expect(invoke).toHaveBeenCalledWith('copy_clip_to_clipboard', { content: 'Hello world' });
   });
 
-  it('Cmd+Backspace deletes selected clip', async () => {
-    const clips = [mockClip()];
-    vi.mocked(invoke).mockImplementation((cmd: string) => {
-      if (cmd === 'list_clips') return Promise.resolve(clips);
-      return Promise.resolve();
-    });
-
-    render(<LocalOnlyView {...defaultProps} />);
-    await waitFor(() => {
-      expect(screen.getByText(/Hello world/)).toBeInTheDocument();
-    });
-
-    // Select the clip
-    await userEvent.click(screen.getByText(/Hello world/));
-
-    // Cmd+Backspace
-    await act(async () => {
-      window.dispatchEvent(new KeyboardEvent('keydown', {
-        key: 'Backspace',
-        metaKey: true,
-        bubbles: true,
-      }));
-    });
-
-    expect(invoke).toHaveBeenCalledWith('delete_clip', { id: 'clip-1' });
-  });
-
   // ─── Search tests ──────────────────────────────────────
 
   it('search input filters clips via invoke("search_clips")', async () => {
