@@ -1,5 +1,7 @@
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info, warn};
+use reqwest;
+use serde_json;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use tauri::{AppHandle, Manager};
@@ -67,9 +69,34 @@ type WsSink = futures_util::stream::SplitSink<
     Message,
 >;
 
+/// Fetch a short-lived single-use WebSocket ticket from POST /ws/ticket.
+/// Returns the hex ticket string on success, or falls back gracefully.
+async fn fetch_ws_ticket(relay_url: &str, token: &str) -> Result<String, String> {
+    let url = format!("{}/ws/ticket", relay_url.trim_end_matches('/'));
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("build http client: {}", e))?;
+    let resp = client
+        .post(&url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| format!("ticket request: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("ticket endpoint returned {}", resp.status()));
+    }
+    let body: serde_json::Value = resp.json().await.map_err(|e| format!("parse: {}", e))?;
+    body["ticket"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| "no ticket in response".to_string())
+}
+
 pub fn spawn_ws_client(
     app: &AppHandle,
-    ws_url: String,
+    relay_url: String,
+    token: String,
     db: Arc<Database>,
     clipboard: Arc<ClipboardService>,
     ws_status: Arc<WsStatus>,
@@ -80,7 +107,7 @@ pub fn spawn_ws_client(
     tauri::async_runtime::spawn(async move {
         let mut backoff = crate::auth::Backoff::new();
         loop {
-            info!("connecting to relay: {}", redact_token(&ws_url));
+            info!("connecting to relay: {}", relay_url);
             ws_status.set("connecting");
             crate::events::WsStatus("connecting".into())
                 .emit(&app_handle)
@@ -89,7 +116,8 @@ pub fn spawn_ws_client(
 
             match connect_and_listen(
                 &app_handle,
-                &ws_url,
+                &relay_url,
+                &token,
                 &db,
                 &clipboard,
                 &ws_status,
@@ -122,13 +150,25 @@ pub fn spawn_ws_client(
 
 async fn connect_and_listen(
     app: &AppHandle,
-    ws_url: &str,
+    relay_url: &str,
+    token: &str,
     db: &Arc<Database>,
     clipboard: &Arc<ClipboardService>,
     ws_status: &Arc<WsStatus>,
     auth_handle: &AuthStateHandle,
     relay_connected: &Arc<AtomicBool>,
 ) -> Result<(), String> {
+    let ws_base = relay_url
+        .replace("https://", "wss://")
+        .replace("http://", "ws://");
+    let ws_url_owned = match fetch_ws_ticket(relay_url, token).await {
+        Ok(ticket) => format!("{}/ws?ticket={}", ws_base.trim_end_matches('/'), ticket),
+        Err(e) => {
+            warn!("ws ticket fetch failed, using token fallback: {}", e);
+            format!("{}/ws?token={}", ws_base.trim_end_matches('/'), token)
+        }
+    };
+    let ws_url = ws_url_owned.as_str();
     let connect_result = connect_async(ws_url).await;
 
     let (ws_stream, _) = match connect_result {
