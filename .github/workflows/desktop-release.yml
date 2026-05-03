@@ -40,7 +40,7 @@ jobs:
           cache: 'npm'
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20a7ba03b8b1838f8f2e # stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
@@ -59,7 +59,7 @@ jobs:
           echo "macOS target assertion passed: $TARGET on $RUNNER_OS"
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@9bdcdcf9cdcf4b3ffde54a63fea16e6ab82f0f75 # v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: src-tauri
           key: ${{ matrix.target }}
@@ -84,7 +84,7 @@ jobs:
           rm certificate.p12
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@73b21e9d14b0c63b3b6db39f82aa92a66da32c89 # v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
