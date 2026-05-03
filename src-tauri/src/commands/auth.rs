@@ -269,10 +269,10 @@ pub fn sign_in(
                 },
             );
 
-            let ws_url = crate::protocol::ws_url_from_relay(&relay2, &token);
             let jh = crate::ws::spawn_ws_client(
                 &app2,
-                ws_url,
+                relay2.clone(),
+                token.clone(),
                 db,
                 clipboard,
                 ws_status,
@@ -450,14 +450,14 @@ pub async fn handle_deeplink(
     }
 
     // Spawn WS client
-    let ws_url = crate::protocol::ws_url_from_relay(&relay_url, &token);
     let db: State<'_, Arc<crate::store::db::Database>> = app.state();
     let clipboard: State<'_, Arc<crate::clipboard::ClipboardService>> = app.state();
     let ws_status: State<'_, Arc<WsStatus>> = app.state();
     let relay_connected: State<'_, Arc<std::sync::atomic::AtomicBool>> = app.state();
     let join_handle = crate::ws::spawn_ws_client(
         &app,
-        ws_url,
+        relay_url.clone(),
+        token.clone(),
         db.inner().clone(),
         clipboard.inner().clone(),
         ws_status.inner().clone(),

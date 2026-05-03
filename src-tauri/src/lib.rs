@@ -109,7 +109,8 @@ pub fn run() {
         }
     };
 
-    let ws_url = config.ws_url();
+    let ws_relay_url = config.relay_url.clone();
+    let ws_token = config.token.clone();
     let relay_url_for_backfill = config.relay_url.clone();
     let token_for_backfill = config.token.clone();
     let config_for_auth_seed = config.clone();
@@ -407,10 +408,10 @@ pub fn run() {
                                 },
                             );
 
-                            let ws_url = crate::protocol::ws_url_from_relay(&relay, &token);
                             let join_handle = ws::spawn_ws_client(
                                 &dl_app_handle,
-                                ws_url,
+                                relay.clone(),
+                                token.clone(),
                                 dl_db.clone(),
                                 dl_clipboard.clone(),
                                 dl_ws_status.clone(),
@@ -449,7 +450,8 @@ pub fn run() {
                     app.state::<AuthStateHandle>().inner().clone();
                 let join = ws::spawn_ws_client(
                     handle,
-                    ws_url.clone(),
+                    ws_relay_url.clone(),
+                    ws_token.clone(),
                     db.clone(),
                     clipboard_service.clone(),
                     ws_status.clone(),

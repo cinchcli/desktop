@@ -6,7 +6,7 @@
 //! are UI-only Tauri command return shapes that the CLI does not need.
 
 pub use client_core::config::{
-    default_relay_url, ws_url_from_relay, Config, MultiConfig, MultiConfigHandle, RelayProfile,
+    default_relay_url, Config, MultiConfig, MultiConfigHandle, RelayProfile,
 };
 pub use client_core::protocol::{
     Clip, DeviceInfo, WSMessage, ACTION_CLIPBOARD_CONTENT, ACTION_CLIP_DELETED,

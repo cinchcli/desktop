@@ -193,7 +193,7 @@ pub async fn pair_with_token(
     }
 
     // Transition auth state and spawn WebSocket
-    let (ws_url, next_state) = {
+    let (ws_relay_url, ws_token, next_state) = {
         let guard = mc.lock().unwrap();
         let profile = guard
             .active_profile()
@@ -203,11 +203,6 @@ pub async fn pair_with_token(
         } else {
             profile.token.clone()
         };
-        let base = profile
-            .relay_url
-            .replace("https://", "wss://")
-            .replace("http://", "ws://");
-        let ws_url = format!("{}/ws?token={}", base, token);
         let next_state = AuthState::Authenticated {
             user_id: profile.user_id.clone(),
             device_id: profile.device_id.clone(),
@@ -215,14 +210,15 @@ pub async fn pair_with_token(
             relay_url: profile.relay_url.clone(),
             active_relay_id: profile.id.clone(),
         };
-        (ws_url, next_state)
+        (profile.relay_url.clone(), token, next_state)
     };
 
     transition(&app, &auth_handle, next_state);
 
     let handle = crate::ws::spawn_ws_client(
         &app,
-        ws_url,
+        ws_relay_url,
+        ws_token,
         db.inner().clone(),
         clipboard.inner().clone(),
         ws_status.inner().clone(),
