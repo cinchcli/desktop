@@ -18,12 +18,12 @@ jobs:
           cache: 'npm'
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20a7ba03b8b1838f8f2e # stable
         with:
           components: rustfmt,clippy
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9bdcdcf9cdcf4b3ffde54a63fea16e6ab82f0f75 # v2
         with:
           workspaces: src-tauri
 
