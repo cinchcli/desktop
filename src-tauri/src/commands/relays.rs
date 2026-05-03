@@ -11,6 +11,26 @@ use crate::auth::{add_relay_profile, load_multi_config, transition, AuthState, A
 use crate::protocol::MultiConfigHandle;
 use crate::ws::{WsAbortHandle, WsStatus};
 
+// ─── PendingAuthRelay ────────────────────────────────────────────────────────
+
+/// Transient marker set by `sign_in` when the desktop opens the browser for a
+/// standard auth flow.  The deep-link `else` branch requires this to be present
+/// *and* to match the `relay_url` carried in the callback URL — rejects crafted
+/// deep-links that arrive without a prior login being initiated.
+pub struct PendingAuthRelay(pub std::sync::Mutex<Option<String>>);
+
+impl PendingAuthRelay {
+    pub fn new() -> Self {
+        Self(std::sync::Mutex::new(None))
+    }
+    pub fn take(&self) -> Option<String> {
+        self.0.lock().unwrap().take()
+    }
+    pub fn set(&self, relay_url: String) {
+        *self.0.lock().unwrap() = Some(relay_url);
+    }
+}
+
 // ─── PendingRelayAdd ─────────────────────────────────────────────────────────
 
 /// Transient marker set by the browser-OAuth flow so `handle_deeplink` knows to

@@ -117,6 +117,7 @@ pub fn run() {
     let multi_config_handle: MultiConfigHandle = Arc::new(Mutex::new(multi_config));
     let ws_abort_handle = Arc::new(ws::WsAbortHandle::new());
     let pending_relay_add = Arc::new(commands::relays::PendingRelayAdd::new());
+    let pending_auth_relay = Arc::new(commands::relays::PendingAuthRelay::new());
 
     // Single clipboard service shared by monitor, ws client, and Tauri commands.
     let clipboard_service = Arc::new(clipboard::ClipboardService::new_platform_default());
@@ -197,6 +198,7 @@ pub fn run() {
         .manage(multi_config_handle.clone())
         .manage(ws_abort_handle.clone())
         .manage(pending_relay_add.clone())
+        .manage(pending_auth_relay.clone())
         .manage(clipboard_service.clone())
         .manage(ws_status.clone())
         .manage(relay_connected.clone())
@@ -254,6 +256,7 @@ pub fn run() {
                 let dl_mc = multi_config_handle.clone();
                 let dl_ws_abort = ws_abort_handle.clone();
                 let dl_pending = pending_relay_add.clone();
+                let dl_pending_auth = pending_auth_relay.clone();
                 app.deep_link().on_open_url(move |event| {
                     let urls = event.urls();
                     for url in &urls {
@@ -351,6 +354,18 @@ pub fn run() {
                                     }
                                 }
                             } else {
+                                // Security: require a pending standard-auth relay URL that
+                                // matches the callback.  Rejects crafted deep-links that
+                                // arrive with no prior login being initiated (Finding 1).
+                                let pending_auth_url = dl_pending_auth.take();
+                                if let Err(reason) = crate::validate_auth_callback(
+                                    pending_auth_url.as_deref(),
+                                    &relay,
+                                ) {
+                                    log::warn!("deep-link: {}", reason);
+                                    return;
+                                }
+
                                 if let Err(e) = client_core::auth_session::install_credentials(
                                     client_core::auth_session::InstallParams {
                                         user_id: &user_id,
@@ -582,6 +597,27 @@ pub(crate) fn validate_relay_url(url: &str) -> Result<(), String> {
         return Err("relay URL must have a host".into());
     }
     Ok(())
+}
+
+/// Validate an incoming `cinch://auth/callback` deep-link against the relay URL
+/// that was recorded when the user actually initiated a login.
+///
+/// Returns `Ok(())` only when:
+/// - `pending_relay_url` is `Some` (a login was actively in progress), AND
+/// - it matches `callback_relay_url` exactly (prevents relay-substitution attacks).
+///
+/// This is a pure function so it can be unit-tested without a running Tauri app.
+pub(crate) fn validate_auth_callback(
+    pending_relay_url: Option<&str>,
+    callback_relay_url: &str,
+) -> Result<(), &'static str> {
+    match pending_relay_url {
+        None => Err("no pending auth — deep-link rejected (no login was initiated)"),
+        Some(pending) if pending != callback_relay_url => {
+            Err("relay_url mismatch — deep-link rejected (possible relay-substitution attack)")
+        }
+        Some(_) => Ok(()),
+    }
 }
 
 /// Sanitize a relay-provided media_path to prevent path traversal.

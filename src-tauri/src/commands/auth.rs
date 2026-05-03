@@ -9,7 +9,7 @@ use tauri_specta::Event;
 use crate::auth::{
     add_relay_profile, load_multi_config, transition, wipe_credentials, AuthState, AuthStateHandle,
 };
-use crate::commands::relays::PendingRelayAdd;
+use crate::commands::relays::{PendingAuthRelay, PendingRelayAdd};
 use crate::protocol::MultiConfigHandle;
 use crate::ws::{WsAbortHandle, WsStatus};
 
@@ -70,6 +70,10 @@ pub fn sign_in(
         .inner()
         .clone();
     let ws_abort = app.state::<Arc<WsAbortHandle>>().inner().clone();
+    let pending_auth_relay = app
+        .state::<Arc<PendingAuthRelay>>()
+        .inner()
+        .clone();
 
     tauri::async_runtime::spawn(async move {
         // Step 1: Issue a device code so the browser auth page can complete the flow.
@@ -145,6 +149,10 @@ pub fn sign_in(
             transition(&app2, &handle2, AuthState::LocalOnly);
             return;
         }
+
+        // Record the relay URL we opened the browser for. The deep-link handler's
+        // else-branch checks this before accepting a cinch://auth/callback (Finding 1).
+        pending_auth_relay.set(relay2.clone());
 
         // Step 3: Poll until the user completes OAuth. Tight cadence early
         // (1s) so OAuth completion is caught quickly; back off to 3s after

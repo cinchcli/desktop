@@ -1,7 +1,61 @@
 #[cfg(test)]
 mod tests {
+    use crate::validate_auth_callback;
+
+    // Finding 1 — no pending auth state must be rejected outright.
     #[test]
-    fn placeholder_deep_link() {
-        // TODO: Replace with real deep-link auth flow tests (Plan 04)
+    fn test_auth_callback_requires_pending_state() {
+        let result = validate_auth_callback(None, "https://relay.example.com");
+        assert!(
+            result.is_err(),
+            "expected Err when no login was initiated, got Ok"
+        );
+    }
+
+    // Finding 1 — callback relay_url differs from the one we opened the browser for.
+    #[test]
+    fn test_auth_callback_rejects_url_mismatch() {
+        let result = validate_auth_callback(
+            Some("https://relay.example.com"),
+            "https://attacker.example.com",
+        );
+        assert!(
+            result.is_err(),
+            "expected Err on relay_url mismatch, got Ok"
+        );
+    }
+
+    // Happy path — pending URL matches callback URL exactly.
+    #[test]
+    fn test_auth_callback_accepts_matching_url() {
+        let result = validate_auth_callback(
+            Some("https://relay.example.com"),
+            "https://relay.example.com",
+        );
+        assert!(
+            result.is_ok(),
+            "expected Ok when pending relay matches callback, got Err: {:?}",
+            result.err()
+        );
+    }
+
+    // Edge: empty pending string should not accidentally match a real URL.
+    #[test]
+    fn test_auth_callback_rejects_empty_pending_vs_real_url() {
+        let result = validate_auth_callback(Some(""), "https://relay.example.com");
+        assert!(
+            result.is_err(),
+            "expected Err when pending is empty string, got Ok"
+        );
+    }
+
+    // Edge: both empty strings match — degenerate but consistent.
+    #[test]
+    fn test_auth_callback_accepts_matching_empty_strings() {
+        let result = validate_auth_callback(Some(""), "");
+        assert!(
+            result.is_ok(),
+            "expected Ok when both pending and callback are empty, got Err"
+        );
     }
 }
