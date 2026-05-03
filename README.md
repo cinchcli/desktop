@@ -54,3 +54,10 @@ Clips are stored locally in `~/Library/Application Support/com.cinch.app/clips.d
 - Website: [cinchcli.com](https://cinchcli.com)
 - CLI + relay: [github.com/cinchcli/relay](https://github.com/cinchcli/relay)
 - Docs: [cinchcli.com/docs](https://cinchcli.com/docs)
+
+## License
+
+Cinch is dual-licensed:
+
+- **AGPL-3.0** — free for personal use, open-source projects, and self-hosted deployments that comply with AGPL terms. See [LICENSE](LICENSE).
+- **Commercial License** — for closed-source products, SaaS deployments, or organizations that need a commercial support agreement. See [LICENSE-COMMERCIAL](LICENSE-COMMERCIAL) or contact [jingmuio@gmail.com](mailto:jingmuio@gmail.com).
