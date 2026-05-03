@@ -76,6 +76,14 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
 pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
+    // Desktop always uses ~/.cinch/config.json (0600) for credential storage instead of the
+    // OS Keychain. ws.rs reads the AES key via auth::read_encryption_key which is config.json-only,
+    // so using Keychain at write time causes a read-miss and decryption failure. Opting out here
+    // makes both read and write paths consistent without any Keychain prompt.
+    if std::env::var("CINCH_KEYRING").is_err() {
+        std::env::set_var("CINCH_KEYRING", "none");
+    }
+
     // Load MultiConfig from ~/.cinch/config.json (migrates legacy single-Config format)
     let multi_config = protocol::MultiConfig::load();
     let config = multi_config.to_active_config();
@@ -193,6 +201,12 @@ pub fn run() {
         .manage(ws_status.clone())
         .manage(relay_connected.clone())
         .manage(auth_state_handle.clone())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             specta_builder.mount_events(app);
@@ -473,8 +487,13 @@ pub fn run() {
             info!("Cinch desktop app started (configured={})", is_configured);
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                api.prevent_exit();
+            }
+        });
 }
 
 /// Spawn the local retention sweep — purges clips older than the
