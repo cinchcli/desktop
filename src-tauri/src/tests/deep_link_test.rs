@@ -58,4 +58,44 @@ mod tests {
             "expected Ok when both pending and callback are empty, got Err"
         );
     }
+
+    // M2: trailing-slash normalization — relay stores trimmed URL but callback
+    // may carry a trailing slash; both directions must match.
+    #[test]
+    fn test_auth_callback_accepts_trailing_slash_on_callback() {
+        let result = validate_auth_callback(
+            Some("https://relay.example.com"),
+            "https://relay.example.com/",
+        );
+        assert!(
+            result.is_ok(),
+            "expected Ok when callback has trailing slash vs stored URL without, got Err: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_auth_callback_accepts_trailing_slash_on_pending() {
+        let result = validate_auth_callback(
+            Some("https://relay.example.com/"),
+            "https://relay.example.com",
+        );
+        assert!(
+            result.is_ok(),
+            "expected Ok when pending has trailing slash vs callback without, got Err: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_auth_callback_rejects_mismatch_with_trailing_slash() {
+        let result = validate_auth_callback(
+            Some("https://relay.example.com/"),
+            "https://attacker.example.com/",
+        );
+        assert!(
+            result.is_err(),
+            "expected Err on relay_url mismatch even with trailing slashes, got Ok"
+        );
+    }
 }

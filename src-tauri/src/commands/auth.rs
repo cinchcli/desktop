@@ -70,10 +70,7 @@ pub fn sign_in(
         .inner()
         .clone();
     let ws_abort = app.state::<Arc<WsAbortHandle>>().inner().clone();
-    let pending_auth_relay = app
-        .state::<Arc<PendingAuthRelay>>()
-        .inner()
-        .clone();
+    let pending_auth_relay = app.state::<Arc<PendingAuthRelay>>().inner().clone();
 
     tauri::async_runtime::spawn(async move {
         // Step 1: Issue a device code so the browser auth page can complete the flow.
@@ -172,6 +169,7 @@ pub fn sign_in(
 
             if tokio::time::Instant::now() > deadline {
                 log::warn!("sign_in: device-code poll timed out");
+                pending_auth_relay.clear();
                 transition(&app2, &handle2, AuthState::LocalOnly);
                 return;
             }
@@ -192,6 +190,7 @@ pub fn sign_in(
             // 410 Gone means the code expired server-side.
             if resp.status() == reqwest::StatusCode::GONE {
                 log::warn!("sign_in: device code expired");
+                pending_auth_relay.clear();
                 transition(&app2, &handle2, AuthState::LocalOnly);
                 return;
             }
@@ -240,6 +239,7 @@ pub fn sign_in(
                 },
             ) {
                 log::error!("sign_in: install_credentials failed: {}", e);
+                pending_auth_relay.clear();
                 transition(&app2, &handle2, AuthState::LocalOnly);
                 return;
             }
@@ -281,6 +281,8 @@ pub fn sign_in(
             );
             ws_abort.replace(jh);
 
+            // I1: Clear pending state — login completed via polling, deep-link no longer needed.
+            pending_auth_relay.clear();
             log::info!(
                 "sign_in: complete via polling: user={}, device={}, relay_id={}",
                 user_id,
@@ -306,6 +308,7 @@ pub async fn handle_deeplink(
     app: AppHandle,
     handle: State<'_, AuthStateHandle>,
     pending: State<'_, Arc<PendingRelayAdd>>,
+    pending_auth: State<'_, Arc<PendingAuthRelay>>,
     mc: State<'_, MultiConfigHandle>,
     ws_abort: State<'_, Arc<WsAbortHandle>>,
 ) -> Result<(), String> {
@@ -373,6 +376,19 @@ pub async fn handle_deeplink(
         }
         relay_id
     } else {
+        // C1: Security — require a pending auth relay URL that matches the callback.
+        // Peek first (don't consume) so a junk cold-start link cannot drain the state
+        // before the legitimate callback is processed.
+        let pending_relay_url = pending_auth.peek();
+        if let Err(reason) =
+            crate::validate_auth_callback(pending_relay_url.as_deref(), &relay_url)
+        {
+            log::warn!("handle_deeplink: rejected deep-link: {}", reason);
+            return Ok(());
+        }
+        // Validation passed — consume the pending state so it cannot be replayed.
+        pending_auth.clear();
+
         // Update active relay credentials atomically (original sign-in flow).
         client_core::auth_session::install_credentials(client_core::auth_session::InstallParams {
             user_id: &user_id,
@@ -464,7 +480,11 @@ pub async fn handle_deeplink(
 /// Mirrors the CLI `auth logout` D-10 behavior.
 #[tauri::command]
 #[specta::specta]
-pub async fn sign_out(app: AppHandle, handle: State<'_, AuthStateHandle>) -> Result<(), String> {
+pub async fn sign_out(
+    app: AppHandle,
+    handle: State<'_, AuthStateHandle>,
+    pending_auth: State<'_, Arc<PendingAuthRelay>>,
+) -> Result<(), String> {
     let cfg = crate::protocol::Config::load().unwrap_or_default();
     if !cfg.token.is_empty() || !cfg.active_device_id.is_empty() {
         // Best-effort revoke — do not fail sign_out on network errors (D-10).
@@ -484,6 +504,10 @@ pub async fn sign_out(app: AppHandle, handle: State<'_, AuthStateHandle>) -> Res
             log::warn!("sign_out: relay revoke failed (ignoring): {}", e);
         }
     }
+
+    // I1: Belt-and-suspenders — clear any pending auth relay so a stale URL
+    // cannot be exploited after the user has signed out.
+    pending_auth.clear();
 
     wipe_credentials().map_err(|e| format!("wipe: {}", e))?;
     transition(&app, &handle, AuthState::LocalOnly);

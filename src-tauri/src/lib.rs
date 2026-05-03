@@ -357,7 +357,9 @@ pub fn run() {
                                 // Security: require a pending standard-auth relay URL that
                                 // matches the callback.  Rejects crafted deep-links that
                                 // arrive with no prior login being initiated (Finding 1).
-                                let pending_auth_url = dl_pending_auth.take();
+                                // I3: peek first so a junk deep-link cannot consume the
+                                // pending state before the legitimate callback arrives.
+                                let pending_auth_url = dl_pending_auth.peek();
                                 if let Err(reason) = crate::validate_auth_callback(
                                     pending_auth_url.as_deref(),
                                     &relay,
@@ -365,6 +367,8 @@ pub fn run() {
                                     log::warn!("deep-link: {}", reason);
                                     return;
                                 }
+                                // Validation passed — now consume the pending state.
+                                dl_pending_auth.clear();
 
                                 if let Err(e) = client_core::auth_session::install_credentials(
                                     client_core::auth_session::InstallParams {
@@ -613,10 +617,15 @@ pub(crate) fn validate_auth_callback(
 ) -> Result<(), &'static str> {
     match pending_relay_url {
         None => Err("no pending auth — deep-link rejected (no login was initiated)"),
-        Some(pending) if pending != callback_relay_url => {
-            Err("relay_url mismatch — deep-link rejected (possible relay-substitution attack)")
+        Some(pending) => {
+            let pending_norm = pending.trim_end_matches('/');
+            let callback_norm = callback_relay_url.trim_end_matches('/');
+            if pending_norm != callback_norm {
+                Err("relay_url mismatch — deep-link rejected (possible relay-substitution attack)")
+            } else {
+                Ok(())
+            }
         }
-        Some(_) => Ok(()),
     }
 }
 

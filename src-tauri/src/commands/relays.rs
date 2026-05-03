@@ -23,11 +23,20 @@ impl PendingAuthRelay {
     pub fn new() -> Self {
         Self(std::sync::Mutex::new(None))
     }
+    #[allow(dead_code)]
     pub fn take(&self) -> Option<String> {
         self.0.lock().unwrap().take()
     }
+    /// Peek at the current value without consuming it.
+    pub fn peek(&self) -> Option<String> {
+        self.0.lock().unwrap().clone()
+    }
     pub fn set(&self, relay_url: String) {
         *self.0.lock().unwrap() = Some(relay_url);
+    }
+    /// Clear the pending state (used on failure/timeout/success paths).
+    pub fn clear(&self) {
+        *self.0.lock().unwrap() = None;
     }
 }
 
