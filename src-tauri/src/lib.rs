@@ -112,8 +112,8 @@ pub fn run() {
 
     let ws_relay_url = config.relay_url.clone();
     let ws_token = config.token.clone();
-    let relay_url_for_backfill = config.relay_url.clone();
-    let token_for_backfill = config.token.clone();
+    let relay_url_for_delta = config.relay_url.clone();
+    let token_for_delta = config.token.clone();
     let config_for_auth_seed = config.clone();
 
     let multi_config_handle: MultiConfigHandle = Arc::new(Mutex::new(multi_config));
@@ -439,11 +439,19 @@ pub fn run() {
                     let _ = window.set_focus();
                 }
 
-                // Backfill clips from relay on first launch
-                let db_backfill = db.clone();
+                // Delta-sync clips from relay on startup (fetches only new clips)
+                let db_delta = db.clone();
                 tauri::async_runtime::spawn(async move {
-                    backfill_from_relay(&db_backfill, &relay_url_for_backfill, &token_for_backfill)
-                        .await;
+                    match client_core::http::RestClient::new(relay_url_for_delta, token_for_delta) {
+                        Ok(http) => {
+                            let http = std::sync::Arc::new(http);
+                            match delta_sync(&db_delta, &http).await {
+                                Ok(n) => info!("startup delta_sync complete: {} clips", n),
+                                Err(e) => log::error!("startup delta_sync failed: {}", e),
+                            }
+                        }
+                        Err(e) => log::error!("startup delta_sync: cannot build client: {}", e),
+                    }
                 });
 
                 // Spawn WebSocket client
@@ -647,46 +655,30 @@ pub(crate) fn sanitize_media_path(media_path: &str) -> Result<std::path::PathBuf
     Ok(path.to_path_buf())
 }
 
-async fn backfill_from_relay(db: &Arc<store::db::Database>, relay_url: &str, token: &str) {
-    info!("backfilling clips from relay...");
+async fn delta_sync(
+    db: &Arc<store::db::Database>,
+    http: &Arc<client_core::http::RestClient>,
+) -> Result<usize, String> {
+    let max_received_at = db.max_received_at()?;
+    let since = if max_received_at == 0 {
+        None
+    } else {
+        chrono::DateTime::from_timestamp(max_received_at, 0)
+    };
 
-    let client = reqwest::Client::new();
-    let url = format!("{}/clips", relay_url);
-
-    let response = match client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .send()
+    let clips = http
+        .list_clips_since(since)
         .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            log::error!("backfill request failed: {}", e);
-            return;
-        }
-    };
+        .map_err(|e| format!("delta_sync: {}", e))?;
 
-    if !response.status().is_success() {
-        log::error!("backfill failed: HTTP {}", response.status());
-        return;
-    }
-
-    let clips: Vec<protocol::Clip> = match response.json().await {
-        Ok(c) => c,
-        Err(e) => {
-            log::error!("backfill parse failed: {}", e);
-            return;
-        }
-    };
-
-    let count = clips.len();
     let received_at = chrono::Utc::now().timestamp();
+    let count = clips.len();
     for clip in &clips {
         let local = store::models::LocalClip::from_proto(clip, received_at);
         if let Err(e) = db.insert_clip(&local) {
-            log::error!("backfill insert failed: {}", e);
+            log::error!("delta_sync insert failed: {}", e);
         }
     }
-
-    info!("backfilled {} clips from relay", count);
+    log::info!("delta_sync: fetched {} clips", count);
+    Ok(count)
 }

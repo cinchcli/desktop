@@ -211,6 +211,25 @@ async fn connect_and_listen(
     // Flush offline queue on reconnect
     flush_offline_queue(app, db).await;
 
+    // Delta-sync: pull any clips we missed while disconnected
+    {
+        let cfg = crate::protocol::Config::load();
+        match cfg {
+            Ok(c) => match client_core::http::RestClient::new(c.relay_url, c.token) {
+                Ok(http) => {
+                    let http = std::sync::Arc::new(http);
+                    match crate::delta_sync(db, &http).await {
+                        Ok(n) if n > 0 => info!("reconnect delta_sync: {} new clips", n),
+                        Ok(_) => {}
+                        Err(e) => warn!("reconnect delta_sync failed: {}", e),
+                    }
+                }
+                Err(e) => warn!("reconnect delta_sync: cannot build client: {}", e),
+            },
+            Err(e) => warn!("reconnect delta_sync: config load failed: {}", e),
+        }
+    }
+
     let (write, mut read) = ws_stream.split();
     let write = Arc::new(Mutex::new(write));
 
