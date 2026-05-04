@@ -205,7 +205,27 @@ pub fn get_sources(db: State<'_, Arc<Database>>) -> Result<Vec<SourceInfo>, Stri
 
 #[tauri::command]
 #[specta::specta]
-pub fn delete_clip(db: State<'_, Arc<Database>>, id: String) -> Result<(), String> {
+pub async fn delete_clip(
+    db: State<'_, Arc<Database>>,
+    mc: State<'_, MultiConfigHandle>,
+    id: String,
+) -> Result<(), String> {
+    // Best-effort relay deletion: propagate to other devices via clip_deleted broadcast.
+    // If the relay is unreachable or returns an error, log and continue — the relay's
+    // TTL will eventually expire the clip. The originating device will also receive
+    // the clip_deleted WS broadcast back; ws.rs handles that with a no-op local delete.
+    if let Ok((relay_url, token)) = resolve_active_creds(&mc) {
+        match client_core::http::RestClient::new(relay_url, token) {
+            Ok(client) => {
+                if let Err(e) = client.delete_clip(&id).await {
+                    log::warn!("relay delete_clip failed for {}: {}", id, e);
+                }
+            }
+            Err(e) => {
+                log::warn!("could not build REST client for delete_clip {}: {}", id, e);
+            }
+        }
+    }
     db.delete_clip(&id)
 }
 
