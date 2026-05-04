@@ -51,3 +51,10 @@ pub struct CliHandoffRequested {
 pub struct SshPairMarkerFound {
     pub url: String,
 }
+
+/// Fired when queued offline clips are dropped because the encryption key
+/// is missing. The frontend shows a toast prompting the user to sign in again.
+#[derive(Clone, Serialize, Deserialize, Type, Event)]
+pub struct OfflineQueueDropped {
+    pub count: u32,
+}

@@ -69,6 +69,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             events::AuthAdoptedFromCli,
             events::CliHandoffRequested,
             events::SshPairMarkerFound,
+            events::OfflineQueueDropped,
         ])
 }
 

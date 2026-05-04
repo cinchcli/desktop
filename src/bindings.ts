@@ -110,6 +110,7 @@ export const events = {
 	imageDownloadComplete: makeEvent<ImageDownloadComplete>("image-download-complete"),
 	imageDownloadFailed: makeEvent<ImageDownloadFailed>("image-download-failed"),
 	newSourceDetected: makeEvent<NewSourceDetected>("new-source-detected"),
+	offlineQueueDropped: makeEvent<OfflineQueueDropped>("offline-queue-dropped"),
 	sshPairMarkerFound: makeEvent<SshPairMarkerFound>("ssh-pair-marker-found"),
 	wsStatus: makeEvent<WsStatus>("ws-status"),
 };
@@ -197,6 +198,14 @@ export type LocalClip = {
 };
 
 export type NewSourceDetected = string;
+
+/**
+ *  Fired when queued offline clips are dropped because the encryption key
+ *  is missing. The frontend shows a toast prompting the user to sign in again.
+ */
+export type OfflineQueueDropped = {
+	count: number,
+};
 
 export type PairWithTokenRequest = {
 	relay_url: string,

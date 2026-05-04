@@ -209,7 +209,7 @@ async fn connect_and_listen(
     tray::update_tray_status(app, "connected");
 
     // Flush offline queue on reconnect
-    flush_offline_queue(db).await;
+    flush_offline_queue(app, db).await;
 
     let (write, mut read) = ws_stream.split();
     let write = Arc::new(Mutex::new(write));
@@ -707,7 +707,22 @@ async fn handle_image_auto_copy(
     Ok(())
 }
 
-async fn flush_offline_queue(db: &Database) {
+pub(crate) struct EncryptedPayload {
+    pub body: String,
+    pub encrypted: bool,
+}
+
+pub(crate) fn encrypt_or_drop(key: Option<&[u8; 32]>, plaintext: &[u8]) -> Option<EncryptedPayload> {
+    let key = key?;
+    crate::crypto::encrypt(key, plaintext)
+        .ok()
+        .map(|ct| EncryptedPayload { body: ct, encrypted: true })
+}
+
+#[cfg(test)]
+pub(crate) use encrypt_or_drop as encrypt_or_drop_for_test;
+
+async fn flush_offline_queue(app: &AppHandle, db: &Database) {
     let unsynced = match db.list_unsynced_clips() {
         Ok(clips) => clips,
         Err(e) => {
@@ -733,34 +748,45 @@ async fn flush_offline_queue(db: &Database) {
     let relay_url = &config.relay_url;
     let token = &config.token;
 
-    // Load encryption key once before the loop — used to encrypt each queued clip.
     let enc_key: Option<[u8; 32]> = crate::auth::credential::read_encryption_key(&config.user_id)
         .ok()
         .and_then(|k| <[u8; 32]>::try_from(k.as_slice()).ok());
+
+    if enc_key.is_none() {
+        let dropped = unsynced.len() as u32;
+        error!(
+            "offline flush: encryption key missing — dropping {} queued clips",
+            dropped
+        );
+        for clip in &unsynced {
+            // Mark synced to prevent a retry storm; the clip is unrecoverable on this device.
+            let _ = db.mark_synced(&clip.id);
+        }
+        crate::events::OfflineQueueDropped { count: dropped }
+            .emit(app)
+            .ok();
+        return;
+    }
 
     let client = reqwest::Client::new();
     for clip in &unsynced {
         let push_url = format!("{}/clips", relay_url);
 
-        // Encrypt content if a key is available; otherwise send plaintext.
-        let (content, encrypted) = if let Some(ref key) = enc_key {
-            match crate::crypto::encrypt(key, clip.content.as_bytes()) {
-                Ok(ciphertext) => (ciphertext, true),
-                Err(e) => {
-                    warn!("offline flush: encrypt failed for {}: {}", clip.id, e);
-                    (clip.content.clone(), false)
-                }
+        let payload = match encrypt_or_drop(enc_key.as_ref(), clip.content.as_bytes()) {
+            Some(p) => p,
+            None => {
+                warn!("offline flush: encrypt failed for {}; dropping", clip.id);
+                let _ = db.mark_synced(&clip.id);
+                continue;
             }
-        } else {
-            (clip.content.clone(), false)
         };
 
         let body = serde_json::json!({
-            "content": content,
+            "content": payload.body,
             "content_type": clip.content_type,
             "source": clip.source,
             "label": clip.label,
-            "encrypted": encrypted,
+            "encrypted": payload.encrypted,
         });
 
         match client
