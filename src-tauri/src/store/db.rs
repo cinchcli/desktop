@@ -205,8 +205,18 @@ impl Database {
     pub fn insert_clip(&self, clip: &LocalClip) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR REPLACE INTO clips (id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced, is_pinned, pin_note, received_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            "INSERT INTO clips (id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced, is_pinned, pin_note, received_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+             ON CONFLICT(id) DO UPDATE SET
+                 content      = excluded.content,
+                 content_type = excluded.content_type,
+                 source       = excluded.source,
+                 label        = excluded.label,
+                 byte_size    = excluded.byte_size,
+                 created_at   = excluded.created_at,
+                 ttl          = excluded.ttl,
+                 media_path   = excluded.media_path,
+                 received_at  = excluded.received_at",
             params![
                 clip.id,
                 clip.user_id,
@@ -1446,6 +1456,91 @@ mod tests {
         let dropped = db.enforce_offline_cap(500).unwrap();
         assert_eq!(dropped, 0);
 
+        let unsynced = db.list_unsynced_clips().unwrap();
+        assert_eq!(unsynced.len(), 1);
+    }
+
+    #[test]
+    fn test_upsert_preserves_pin() {
+        let db = test_db();
+
+        // 1. Insert a clip initially
+        let mut clip = make_clip("upsert-test", "original content", "remote:prod", "text");
+        clip.synced = true;
+        db.insert_clip(&clip).unwrap();
+
+        // 2. Pin it with a note
+        db.pin_clip("upsert-test", Some("my important note"))
+            .unwrap();
+
+        // 3. Verify it's pinned
+        let pinned = db.list_pinned_clips().unwrap();
+        assert_eq!(pinned.len(), 1);
+        assert_eq!(pinned[0].is_pinned, true);
+        assert_eq!(pinned[0].pin_note, Some("my important note".to_string()));
+
+        // 4. Upsert the same clip with different content (simulating relay re-delivery)
+        let mut updated_clip = make_clip("upsert-test", "updated content", "remote:prod", "text");
+        updated_clip.synced = true;
+        updated_clip.is_pinned = false; // incoming clip doesn't know about pin state
+        updated_clip.pin_note = None;   // incoming clip has no pin note
+        db.insert_clip(&updated_clip).unwrap();
+
+        // 5. Verify the pin state is STILL present (not overwritten)
+        let clips = db.list_clips(None, None, 50).unwrap();
+        assert_eq!(clips.len(), 1);
+        assert_eq!(clips[0].id, "upsert-test");
+        assert_eq!(
+            clips[0].content, "updated content",
+            "mutable fields should be updated"
+        );
+        assert_eq!(
+            clips[0].is_pinned, true,
+            "is_pinned should be preserved from local state"
+        );
+        assert_eq!(
+            clips[0].pin_note, Some("my important note".to_string()),
+            "pin_note should be preserved from local state"
+        );
+
+        // 6. Verify pinned list still shows it
+        let pinned = db.list_pinned_clips().unwrap();
+        assert_eq!(pinned.len(), 1);
+        assert_eq!(pinned[0].is_pinned, true);
+    }
+
+    #[test]
+    fn test_upsert_preserves_synced() {
+        let db = test_db();
+
+        // 1. Insert a clip with synced=false (offline local push)
+        let mut clip = make_clip("synced-upsert", "local content", "local", "text");
+        clip.synced = false;
+        db.insert_clip(&clip).unwrap();
+
+        // 2. Verify it's unsynced
+        let unsynced = db.list_unsynced_clips().unwrap();
+        assert_eq!(unsynced.len(), 1);
+        assert_eq!(unsynced[0].synced, false);
+
+        // 3. Upsert with new content but incoming synced=true (relay doesn't set our synced flag)
+        let mut relay_clip = make_clip("synced-upsert", "updated from relay", "remote:prod", "text");
+        relay_clip.synced = true; // relay clip always has synced=true
+        db.insert_clip(&relay_clip).unwrap();
+
+        // 4. Verify synced flag is STILL false (preserved)
+        let clips = db.list_clips(None, None, 50).unwrap();
+        assert_eq!(clips.len(), 1);
+        assert_eq!(
+            clips[0].synced, false,
+            "synced should be preserved from local state"
+        );
+        assert_eq!(
+            clips[0].content, "updated from relay",
+            "mutable fields should be updated"
+        );
+
+        // 5. Verify unsynced list still shows it
         let unsynced = db.list_unsynced_clips().unwrap();
         assert_eq!(unsynced.len(), 1);
     }
