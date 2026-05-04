@@ -659,12 +659,13 @@ async fn delta_sync(
     db: &Arc<store::db::Database>,
     http: &Arc<client_core::http::RestClient>,
 ) -> Result<usize, String> {
-    let max_received_at = db.max_received_at()?;
-    let since = if max_received_at == 0 {
-        None
-    } else {
-        chrono::DateTime::from_timestamp(max_received_at, 0)
-    };
+    let since = db.max_created_at()?.and_then(|ts| {
+        if ts == 0 {
+            None
+        } else {
+            chrono::DateTime::from_timestamp(ts, 0)
+        }
+    });
 
     let clips = http
         .list_clips_since(since)
