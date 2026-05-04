@@ -681,18 +681,20 @@ impl Database {
             .map_err(|e| format!("count failed: {}", e))
     }
 
-    /// Returns the maximum `received_at` timestamp across all stored clips,
-    /// or 0 if there are no clips. Used as the delta-sync watermark for
-    /// `GET /clips?since=<max_received_at>` on reconnect (consumed by Task B3).
-    #[allow(dead_code)]
-    pub fn max_received_at(&self) -> Result<i64, String> {
+    /// Returns the maximum `created_at` timestamp across all stored clips, or
+    /// `None` if the table is empty. Used as the delta-sync watermark: because
+    /// `created_at` is copied verbatim from the relay's `created_at` field, it
+    /// lives in the same clock domain as the relay's `ListClipsSince` filter,
+    /// avoiding the skew that would occur if we used the desktop's local
+    /// `received_at` wall-clock instead.
+    pub fn max_created_at(&self) -> Result<Option<i64>, String> {
         let conn = self.conn.lock().unwrap();
-        conn.query_row(
-            "SELECT COALESCE(MAX(received_at), 0) FROM clips",
+        let result: rusqlite::Result<Option<i64>> = conn.query_row(
+            "SELECT MAX(created_at) FROM clips",
             [],
             |row| row.get(0),
-        )
-        .map_err(|e| format!("max_received_at: {}", e))
+        );
+        result.map_err(|e| format!("max_created_at: {}", e))
     }
 
     // --- Settings ---
@@ -1483,7 +1485,7 @@ mod tests {
         let mut updated_clip = make_clip("upsert-test", "updated content", "remote:prod", "text");
         updated_clip.synced = true;
         updated_clip.is_pinned = false; // incoming clip doesn't know about pin state
-        updated_clip.pin_note = None;   // incoming clip has no pin note
+        updated_clip.pin_note = None; // incoming clip has no pin note
         db.insert_clip(&updated_clip).unwrap();
 
         // 5. Verify the pin state is STILL present (not overwritten)
@@ -1499,7 +1501,8 @@ mod tests {
             "is_pinned should be preserved from local state"
         );
         assert_eq!(
-            clips[0].pin_note, Some("my important note".to_string()),
+            clips[0].pin_note,
+            Some("my important note".to_string()),
             "pin_note should be preserved from local state"
         );
 
@@ -1524,7 +1527,8 @@ mod tests {
         assert_eq!(unsynced[0].synced, false);
 
         // 3. Upsert with new content but incoming synced=true (relay doesn't set our synced flag)
-        let mut relay_clip = make_clip("synced-upsert", "updated from relay", "remote:prod", "text");
+        let mut relay_clip =
+            make_clip("synced-upsert", "updated from relay", "remote:prod", "text");
         relay_clip.synced = true; // relay clip always has synced=true
         db.insert_clip(&relay_clip).unwrap();
 
