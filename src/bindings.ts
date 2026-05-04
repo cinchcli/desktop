@@ -195,6 +195,7 @@ export type LocalClip = {
 	synced: boolean,
 	is_pinned: boolean,
 	pin_note: string | null,
+	received_at: number,
 };
 
 export type NewSourceDetected = string;
