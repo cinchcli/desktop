@@ -369,7 +369,7 @@ async fn handle_text_message(
                 }
 
                 // Persist to local DB
-                let local_clip = LocalClip::from_proto(&clip);
+                let local_clip = LocalClip::from_proto(&clip, chrono::Utc::now().timestamp());
                 if let Err(e) = db.insert_clip(&local_clip) {
                     error!("db insert failed: {}", e);
                 }
@@ -712,11 +712,17 @@ pub(crate) struct EncryptedPayload {
     pub encrypted: bool,
 }
 
-pub(crate) fn encrypt_or_drop(key: Option<&[u8; 32]>, plaintext: &[u8]) -> Option<EncryptedPayload> {
+pub(crate) fn encrypt_or_drop(
+    key: Option<&[u8; 32]>,
+    plaintext: &[u8],
+) -> Option<EncryptedPayload> {
     let key = key?;
     crate::crypto::encrypt(key, plaintext)
         .ok()
-        .map(|ct| EncryptedPayload { body: ct, encrypted: true })
+        .map(|ct| EncryptedPayload {
+            body: ct,
+            encrypted: true,
+        })
 }
 
 #[cfg(test)]

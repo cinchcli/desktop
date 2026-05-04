@@ -18,10 +18,11 @@ pub struct LocalClip {
     pub synced: bool,
     pub is_pinned: bool,
     pub pin_note: Option<String>,
+    pub received_at: i64, // unix timestamp: when this desktop received the clip
 }
 
 impl LocalClip {
-    pub fn from_proto(clip: &ProtoClip) -> Self {
+    pub fn from_proto(clip: &ProtoClip, received_at: i64) -> Self {
         let content_type = detect_content_type(&clip.content, &clip.content_type);
         let created_at = parse_timestamp(&clip.created_at);
 
@@ -39,6 +40,7 @@ impl LocalClip {
             synced: true,
             is_pinned: false,
             pin_note: None,
+            received_at,
         }
     }
 }
@@ -144,7 +146,7 @@ mod tests {
             ttl: None,
             encrypted: false,
         };
-        let local = LocalClip::from_proto(&proto);
+        let local = LocalClip::from_proto(&proto, chrono::Utc::now().timestamp());
         assert_eq!(local.content_type, "json"); // detected client-side
         assert!(local.created_at > 0); // parsed some timestamp
     }

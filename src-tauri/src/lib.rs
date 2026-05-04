@@ -680,8 +680,9 @@ async fn backfill_from_relay(db: &Arc<store::db::Database>, relay_url: &str, tok
     };
 
     let count = clips.len();
+    let received_at = chrono::Utc::now().timestamp();
     for clip in &clips {
-        let local = store::models::LocalClip::from_proto(clip);
+        let local = store::models::LocalClip::from_proto(clip, received_at);
         if let Err(e) = db.insert_clip(&local) {
             log::error!("backfill insert failed: {}", e);
         }

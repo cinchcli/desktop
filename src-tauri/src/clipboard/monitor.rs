@@ -180,6 +180,7 @@ fn handle_text_clip(
         synced,
         is_pinned: false,
         pin_note: None,
+        received_at: now,
     };
 
     if let Err(e) = db.insert_clip(&local_clip) {
@@ -275,6 +276,7 @@ fn handle_image_clip(
         synced,
         is_pinned: false,
         pin_note: None,
+        received_at: now,
     };
 
     if let Err(e) = db.insert_clip(&local_clip) {

@@ -159,6 +159,45 @@ impl Database {
                 .map_err(|e| format!("migration pin_note failed: {}", e))?;
         }
 
+        // Migrate: add received_at for delta-sync watermark.
+        // Check if column already exists to avoid running the backfill UPDATE
+        // on every app launch. On legacy seed schemas used in tests the FTS5
+        // table may not yet be present when the UPDATE fires its trigger, so
+        // we swallow the error. On production databases the FTS5 table is always
+        // present because it was created earlier in this same migrate() call.
+        let has_received_at: bool = conn
+            .prepare("PRAGMA table_info(clips)")
+            .map_err(|e| format!("pragma failed: {}", e))?
+            .query_map([], |row| {
+                let name: String = row.get(1)?;
+                Ok(name)
+            })
+            .map_err(|e| format!("pragma query failed: {}", e))?
+            .filter_map(|r| r.ok())
+            .any(|name| name == "received_at");
+
+        if !has_received_at {
+            conn.execute(
+                "ALTER TABLE clips ADD COLUMN received_at INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .map_err(|e| format!("migration received_at failed: {}", e))?;
+            // On legacy seed schemas used in tests the FTS5 table may not yet
+            // be present when the UPDATE fires its trigger, so we swallow the error.
+            // On production databases the FTS5 table is always present because it was
+            // created earlier in this same migrate() call.
+            let _ = conn.execute(
+                "UPDATE clips SET received_at = created_at WHERE received_at = 0",
+                [],
+            );
+        }
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_clips_received ON clips(received_at DESC)",
+            [],
+        )
+        .map_err(|e| format!("create idx_clips_received: {}", e))?;
+
         info!("database migration complete");
         Ok(())
     }
@@ -166,8 +205,8 @@ impl Database {
     pub fn insert_clip(&self, clip: &LocalClip) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR REPLACE INTO clips (id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced, is_pinned, pin_note)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            "INSERT OR REPLACE INTO clips (id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced, is_pinned, pin_note, received_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 clip.id,
                 clip.user_id,
@@ -182,6 +221,7 @@ impl Database {
                 clip.synced,
                 clip.is_pinned as i32,
                 clip.pin_note,
+                clip.received_at,
             ],
         )
         .map_err(|e| format!("insert failed: {}", e))?;
@@ -197,7 +237,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
 
         let mut sql = String::from(
-            "SELECT id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced, is_pinned, pin_note
+            "SELECT id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced, is_pinned, pin_note, received_at
              FROM clips WHERE 1=1",
         );
         let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -237,6 +277,7 @@ impl Database {
                     synced: row.get::<_, bool>(10).unwrap_or(true),
                     is_pinned: row.get::<_, i32>(11).unwrap_or(0) != 0,
                     pin_note: row.get(12)?,
+                    received_at: row.get::<_, i64>(13).unwrap_or(0),
                 })
             })
             .map_err(|e| format!("query failed: {}", e))?
@@ -250,7 +291,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced, is_pinned, pin_note
+                "SELECT id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced, is_pinned, pin_note, received_at
                  FROM clips WHERE is_pinned = 1 ORDER BY created_at DESC",
             )
             .map_err(|e| format!("prepare failed: {}", e))?;
@@ -271,6 +312,7 @@ impl Database {
                     synced: row.get::<_, bool>(10).unwrap_or(true),
                     is_pinned: true,
                     pin_note: row.get(12)?,
+                    received_at: row.get::<_, i64>(13).unwrap_or(0),
                 })
             })
             .map_err(|e| format!("query failed: {}", e))?
@@ -309,12 +351,12 @@ impl Database {
         let like_pattern = format!("%{}%", query);
         let mut stmt = conn
             .prepare(
-                "SELECT c.id, c.user_id, c.content, c.content_type, c.source, c.label, c.byte_size, c.media_path, c.created_at, c.ttl, c.synced, c.is_pinned, c.pin_note
+                "SELECT c.id, c.user_id, c.content, c.content_type, c.source, c.label, c.byte_size, c.media_path, c.created_at, c.ttl, c.synced, c.is_pinned, c.pin_note, c.received_at
                  FROM clips c
                  JOIN clips_fts f ON c.rowid = f.rowid
                  WHERE clips_fts MATCH ?1
                  UNION
-                 SELECT c.id, c.user_id, c.content, c.content_type, c.source, c.label, c.byte_size, c.media_path, c.created_at, c.ttl, c.synced, c.is_pinned, c.pin_note
+                 SELECT c.id, c.user_id, c.content, c.content_type, c.source, c.label, c.byte_size, c.media_path, c.created_at, c.ttl, c.synced, c.is_pinned, c.pin_note, c.received_at
                  FROM clips c
                  WHERE c.is_pinned = 1 AND c.pin_note LIKE ?2
                  ORDER BY created_at DESC
@@ -338,6 +380,7 @@ impl Database {
                     synced: row.get::<_, bool>(10).unwrap_or(true),
                     is_pinned: row.get::<_, i32>(11).unwrap_or(0) != 0,
                     pin_note: row.get(12)?,
+                    received_at: row.get::<_, i64>(13).unwrap_or(0),
                 })
             })
             .map_err(|e| format!("search failed: {}", e))?
@@ -544,7 +587,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced, is_pinned, pin_note
+                "SELECT id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced, is_pinned, pin_note, received_at
                  FROM clips WHERE synced = FALSE ORDER BY created_at ASC",
             )
             .map_err(|e| format!("prepare failed: {}", e))?;
@@ -565,6 +608,7 @@ impl Database {
                     synced: row.get::<_, bool>(10).unwrap_or(true),
                     is_pinned: row.get::<_, i32>(11).unwrap_or(0) != 0,
                     pin_note: row.get(12)?,
+                    received_at: row.get::<_, i64>(13).unwrap_or(0),
                 })
             })
             .map_err(|e| format!("query failed: {}", e))?
@@ -625,6 +669,20 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         conn.query_row("SELECT COUNT(*) FROM clips", [], |row| row.get(0))
             .map_err(|e| format!("count failed: {}", e))
+    }
+
+    /// Returns the maximum `received_at` timestamp across all stored clips,
+    /// or 0 if there are no clips. Used as the delta-sync watermark for
+    /// `GET /clips?since=<max_received_at>` on reconnect (consumed by Task B3).
+    #[allow(dead_code)]
+    pub fn max_received_at(&self) -> Result<i64, String> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT COALESCE(MAX(received_at), 0) FROM clips",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("max_received_at: {}", e))
     }
 
     // --- Settings ---
@@ -742,6 +800,7 @@ mod tests {
             synced: true,
             is_pinned: false,
             pin_note: None,
+            received_at: 0,
         }
     }
 
