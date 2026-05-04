@@ -57,7 +57,9 @@ Clips are stored locally in `~/Library/Application Support/com.cinch.app/clips.d
 
 ## License
 
-Cinch is dual-licensed:
+Cinch Desktop is proprietary software. See [LICENSE](LICENSE).
 
-- **AGPL-3.0** — free for personal use, open-source projects, and self-hosted deployments that comply with AGPL terms. See [LICENSE](LICENSE).
-- **Commercial License** — for closed-source products, SaaS deployments, or organizations that need a commercial support agreement. See [LICENSE-COMMERCIAL](LICENSE-COMMERCIAL) or contact [jingmuio@gmail.com](mailto:jingmuio@gmail.com).
+The relay server and CLI are open source under AGPL-3.0:
+[github.com/cinchcli/relay](https://github.com/cinchcli/relay) · [github.com/cinchcli/cinch](https://github.com/cinchcli/cinch)
+
+For licensing inquiries: [jingmuio@gmail.com](mailto:jingmuio@gmail.com)
