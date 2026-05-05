@@ -14,7 +14,6 @@ pub struct LocalClip {
     pub byte_size: i64,
     pub media_path: Option<String>,
     pub created_at: i64, // unix timestamp
-    pub ttl: i64,
     pub synced: bool,
     pub is_pinned: bool,
     pub pin_note: Option<String>,
@@ -36,7 +35,6 @@ impl LocalClip {
             byte_size: clip.byte_size,
             media_path: clip.media_path.clone(),
             created_at,
-            ttl: clip.ttl.unwrap_or(0),
             synced: true,
             is_pinned: false,
             pin_note: None,
@@ -143,7 +141,6 @@ mod tests {
             byte_size: 20,
             media_path: None,
             created_at: "2026-04-14T12:00:00Z".into(),
-            ttl: None,
             encrypted: false,
         };
         let local = LocalClip::from_proto(&proto, chrono::Utc::now().timestamp());
