@@ -525,6 +525,30 @@ pub fn get_ws_status(ws_status: State<'_, Arc<WsStatus>>) -> String {
     ws_status.get()
 }
 
+/// Restore focus to the app that was frontmost before Cinch was shown, then hide the
+/// Cinch window. On non-macOS platforms this simply hides the window.
+#[tauri::command]
+#[specta::specta]
+pub fn focus_previous_app(
+    app: tauri::AppHandle,
+    previous_pid: State<'_, crate::PreviousAppPid>,
+) -> Result<(), String> {
+    use tauri::Manager;
+    #[cfg(target_os = "macos")]
+    {
+        let pid_opt = *previous_pid.lock().map_err(|e| e.to_string())?;
+        if let Some(pid) = pid_opt {
+            crate::activate_app_by_pid(pid);
+        }
+    }
+
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
