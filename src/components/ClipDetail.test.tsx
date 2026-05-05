@@ -13,7 +13,6 @@ const baseClip: LocalClip = {
   byte_size: 11,
   media_path: null,
   created_at: 1_777_614_529,
-  ttl: 86400,
   synced: false,
   is_pinned: false,
   pin_note: null,

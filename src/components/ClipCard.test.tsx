@@ -16,7 +16,6 @@ const textClip: LocalClip = {
   byte_size: 62,
   media_path: null,
   created_at: Math.floor(Date.now() / 1000) - 120,
-  ttl: 0,
   synced: false,
 };
 
@@ -30,7 +29,6 @@ const imageClip: LocalClip = {
   byte_size: 245760,
   media_path: '/tmp/screenshot.png',
   created_at: Math.floor(Date.now() / 1000) - 300,
-  ttl: 0,
   synced: false,
 };
 
@@ -44,7 +42,6 @@ const binaryClip: LocalClip = {
   byte_size: 1048576,
   media_path: null,
   created_at: Math.floor(Date.now() / 1000) - 600,
-  ttl: 0,
   synced: false,
 };
 
