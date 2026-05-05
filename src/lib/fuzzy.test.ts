@@ -13,7 +13,6 @@ function clip(partial: Partial<LocalClip>): LocalClip {
     byte_size: partial.byte_size ?? 0,
     media_path: partial.media_path ?? null,
     created_at: partial.created_at ?? 0,
-    ttl: partial.ttl ?? 0,
     synced: partial.synced ?? true,
     is_pinned: partial.is_pinned ?? false,
     pin_note: partial.pin_note ?? null,

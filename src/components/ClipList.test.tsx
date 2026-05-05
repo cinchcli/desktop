@@ -17,7 +17,6 @@ const clip = (overrides: Partial<LocalClip>): LocalClip => ({
   media_path: null,
   user_id: 'u1',
   label: '',
-  ttl: 0,
   synced: false,
   ...overrides,
 });

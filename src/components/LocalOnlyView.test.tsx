@@ -27,7 +27,6 @@ const mockClip = (overrides: Partial<LocalClip> = {}): LocalClip => ({
   byte_size: 11,
   media_path: null,
   created_at: Math.floor(Date.now() / 1000) - 60,
-  ttl: 0,
   synced: false,
   ...overrides,
 });
@@ -41,6 +40,7 @@ const defaultProps = {
 describe('LocalOnlyView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   it('renders clip list when clips exist', async () => {
@@ -128,6 +128,36 @@ describe('LocalOnlyView', () => {
 
     // Skeleton should be gone
     expect(screen.queryByTestId('loading-skeleton')).not.toBeInTheDocument();
+  });
+
+  it('uses customized filter rules from localStorage', async () => {
+    localStorage.setItem('cinch-clip-filter-rules', JSON.stringify({
+      text: ['text', 'json', 'error'],
+      image: ['image'],
+      code: ['code'],
+      url: ['url'],
+    }));
+    const clips = [
+      mockClip({ id: 'text-clip', content: 'Plain', content_type: 'text' }),
+      mockClip({ id: 'error-clip', content: 'Boom', content_type: 'error' }),
+      mockClip({ id: 'image-clip', content: '', content_type: 'image', media_path: 'media/x.png' }),
+    ];
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === 'list_clips') return Promise.resolve(clips);
+      return Promise.resolve();
+    });
+
+    render(<LocalOnlyView {...defaultProps} />);
+    await waitFor(() => {
+      expect(screen.getByText(/Plain/)).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'text' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Boom/)).toBeInTheDocument();
+      expect(screen.queryByText(/Image/)).not.toBeInTheDocument();
+    });
   });
 
   // ─── Keyboard handler tests (Task 2) ─────────────────
