@@ -191,7 +191,6 @@ export type LocalClip = {
 	byte_size: number,
 	media_path: string | null,
 	created_at: number,
-	ttl: number,
 	synced: boolean,
 	is_pinned: boolean,
 	pin_note: string | null,
