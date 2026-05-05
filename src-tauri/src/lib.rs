@@ -643,31 +643,54 @@ pub(crate) fn sanitize_media_path(media_path: &str) -> Result<std::path::PathBuf
     Ok(path.to_path_buf())
 }
 
+const DELTA_PAGE_SIZE: u32 = 100;
+
 async fn delta_sync(
     db: &Arc<store::db::Database>,
     http: &Arc<client_core::http::RestClient>,
 ) -> Result<usize, String> {
-    let since = db.max_created_at()?.and_then(|ts| {
+    let mut since = db.max_created_at()?.and_then(|ts| {
         if ts == 0 {
             None
         } else {
             chrono::DateTime::from_timestamp(ts, 0)
         }
     });
+    let mut total = 0usize;
 
-    let clips = http
-        .list_clips_since(since)
-        .await
-        .map_err(|e| format!("delta_sync: {}", e))?;
+    loop {
+        let clips = http
+            .list_clips_since(since, DELTA_PAGE_SIZE)
+            .await
+            .map_err(|e| format!("delta_sync: {}", e))?;
 
-    let received_at = chrono::Utc::now().timestamp();
-    let count = clips.len();
-    for clip in &clips {
-        let local = store::models::LocalClip::from_proto(clip, received_at);
-        if let Err(e) = db.insert_clip(&local) {
-            log::error!("delta_sync insert failed: {}", e);
+        let page_len = clips.len();
+        if page_len == 0 {
+            break;
+        }
+
+        let received_at = chrono::Utc::now().timestamp();
+        for clip in &clips {
+            let local = store::models::LocalClip::from_proto(clip, received_at);
+            if let Err(e) = db.insert_clip(&local) {
+                log::error!("delta_sync insert failed: {}", e);
+            }
+        }
+        total += page_len;
+
+        // Advance the watermark to the last clip's created_at for the next page.
+        // created_at on the proto Clip is an RFC3339 string; parse it into DateTime<Utc>.
+        if let Some(last) = clips.last() {
+            since = chrono::DateTime::parse_from_rfc3339(&last.created_at)
+                .ok()
+                .map(|dt| dt.with_timezone(&chrono::Utc));
+        }
+
+        if (page_len as u32) < DELTA_PAGE_SIZE {
+            break; // last page — no more to fetch
         }
     }
-    log::info!("delta_sync: fetched {} clips", count);
-    Ok(count)
+
+    log::info!("delta_sync: fetched {} clips total", total);
+    Ok(total)
 }
