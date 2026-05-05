@@ -222,6 +222,11 @@ async fn connect_and_listen(
                 Ok(_) => {}
                 Err(e) => warn!("reconnect delta_sync failed: {}", e),
             }
+            match crate::tombstone_sync(db, &http).await {
+                Ok(n) if n > 0 => info!("reconnect tombstone_sync: applied {} deletions", n),
+                Ok(_) => {}
+                Err(e) => warn!("reconnect tombstone_sync failed: {}", e),
+            }
         }
         Err(e) => warn!("reconnect delta_sync: cannot build client: {}", e),
     }
