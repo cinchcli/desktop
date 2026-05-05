@@ -644,6 +644,7 @@ pub(crate) fn sanitize_media_path(media_path: &str) -> Result<std::path::PathBuf
 }
 
 const DELTA_PAGE_SIZE: u32 = 100;
+const DELTA_MAX_PAGES: usize = 50; // safety cap: 5000 clips max per sync
 
 async fn delta_sync(
     db: &Arc<store::db::Database>,
@@ -658,7 +659,7 @@ async fn delta_sync(
     });
     let mut total = 0usize;
 
-    loop {
+    for page in 0..DELTA_MAX_PAGES {
         let clips = http
             .list_clips_since(since, DELTA_PAGE_SIZE)
             .await
@@ -678,17 +679,39 @@ async fn delta_sync(
         }
         total += page_len;
 
-        // Advance the watermark to the last clip's created_at for the next page.
-        // created_at on the proto Clip is an RFC3339 string; parse it into DateTime<Utc>.
-        if let Some(last) = clips.last() {
-            since = chrono::DateTime::parse_from_rfc3339(&last.created_at)
-                .ok()
-                .map(|dt| dt.with_timezone(&chrono::Utc));
-        }
-
         if (page_len as u32) < DELTA_PAGE_SIZE {
             break; // last page — no more to fetch
         }
+
+        // Advance watermark for next page.
+        let new_since = clips
+            .last()
+            .and_then(|c| chrono::DateTime::parse_from_rfc3339(&c.created_at).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc));
+
+        // No-progress guard: if watermark didn't change, all clips in this page
+        // share the same timestamp and the relay's `created_at > since` filter
+        // will return 0 results next page. Break to avoid silent data loss.
+        if new_since == since {
+            log::warn!(
+                "delta_sync: watermark stalled at {:?} after {} clips — \
+                 {} clips may share the same timestamp, stopping to avoid data loss",
+                since,
+                total,
+                page_len
+            );
+            break;
+        }
+
+        if page == DELTA_MAX_PAGES - 1 {
+            log::warn!(
+                "delta_sync: hit max-page cap ({} pages, {} clips)",
+                DELTA_MAX_PAGES,
+                total
+            );
+        }
+
+        since = new_since;
     }
 
     log::info!("delta_sync: fetched {} clips total", total);
