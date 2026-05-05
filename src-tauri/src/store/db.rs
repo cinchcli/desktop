@@ -44,8 +44,7 @@ impl Database {
                 source       TEXT NOT NULL,
                 label        TEXT DEFAULT '',
                 byte_size    INTEGER DEFAULT 0,
-                created_at   INTEGER NOT NULL,
-                ttl          INTEGER DEFAULT 0
+                created_at   INTEGER NOT NULL
             );
 
             CREATE INDEX IF NOT EXISTS idx_clips_source ON clips(source);
@@ -198,6 +197,19 @@ impl Database {
         )
         .map_err(|e| format!("create idx_clips_received: {}", e))?;
 
+        // Drop ttl column — field retired from proto; replaced by local_retention_days sweep.
+        let has_ttl = conn
+            .prepare("PRAGMA table_info(clips)")
+            .map_err(|e| format!("pragma ttl check failed: {}", e))?
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|e| format!("pragma ttl query failed: {}", e))?
+            .any(|r| r.map(|n| n == "ttl").unwrap_or(false));
+        if has_ttl {
+            conn.execute_batch("ALTER TABLE clips DROP COLUMN ttl;")
+                .map_err(|e| format!("migration drop ttl failed: {}", e))?;
+            info!("migration: dropped ttl column");
+        }
+
         info!("database migration complete");
         Ok(())
     }
@@ -205,8 +217,8 @@ impl Database {
     pub fn insert_clip(&self, clip: &LocalClip) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO clips (id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced, is_pinned, pin_note, received_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            "INSERT INTO clips (id, user_id, content, content_type, source, label, byte_size, media_path, created_at, synced, is_pinned, pin_note, received_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
              ON CONFLICT(id) DO UPDATE SET
                  content      = excluded.content,
                  content_type = excluded.content_type,
@@ -214,7 +226,6 @@ impl Database {
                  label        = excluded.label,
                  byte_size    = excluded.byte_size,
                  created_at   = excluded.created_at,
-                 ttl          = excluded.ttl,
                  media_path   = excluded.media_path,
                  received_at  = excluded.received_at",
             params![
@@ -227,7 +238,6 @@ impl Database {
                 clip.byte_size,
                 clip.media_path,
                 clip.created_at,
-                clip.ttl,
                 clip.synced,
                 clip.is_pinned as i32,
                 clip.pin_note,
@@ -247,7 +257,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
 
         let mut sql = String::from(
-            "SELECT id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced, is_pinned, pin_note, received_at
+            "SELECT id, user_id, content, content_type, source, label, byte_size, media_path, created_at, synced, is_pinned, pin_note, received_at
              FROM clips WHERE 1=1",
         );
         let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -283,11 +293,10 @@ impl Database {
                     byte_size: row.get(6)?,
                     media_path: row.get(7)?,
                     created_at: row.get(8)?,
-                    ttl: row.get(9)?,
-                    synced: row.get::<_, bool>(10).unwrap_or(true),
-                    is_pinned: row.get::<_, i32>(11).unwrap_or(0) != 0,
-                    pin_note: row.get(12)?,
-                    received_at: row.get::<_, i64>(13).unwrap_or(0),
+                    synced: row.get::<_, bool>(9).unwrap_or(true),
+                    is_pinned: row.get::<_, i32>(10).unwrap_or(0) != 0,
+                    pin_note: row.get(11)?,
+                    received_at: row.get::<_, i64>(12).unwrap_or(0),
                 })
             })
             .map_err(|e| format!("query failed: {}", e))?
@@ -301,7 +310,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced, is_pinned, pin_note, received_at
+                "SELECT id, user_id, content, content_type, source, label, byte_size, media_path, created_at, synced, is_pinned, pin_note, received_at
                  FROM clips WHERE is_pinned = 1 ORDER BY created_at DESC",
             )
             .map_err(|e| format!("prepare failed: {}", e))?;
@@ -318,11 +327,10 @@ impl Database {
                     byte_size: row.get(6)?,
                     media_path: row.get(7)?,
                     created_at: row.get(8)?,
-                    ttl: row.get(9)?,
-                    synced: row.get::<_, bool>(10).unwrap_or(true),
+                    synced: row.get::<_, bool>(9).unwrap_or(true),
                     is_pinned: true,
-                    pin_note: row.get(12)?,
-                    received_at: row.get::<_, i64>(13).unwrap_or(0),
+                    pin_note: row.get(11)?,
+                    received_at: row.get::<_, i64>(12).unwrap_or(0),
                 })
             })
             .map_err(|e| format!("query failed: {}", e))?
@@ -361,12 +369,12 @@ impl Database {
         let like_pattern = format!("%{}%", query);
         let mut stmt = conn
             .prepare(
-                "SELECT c.id, c.user_id, c.content, c.content_type, c.source, c.label, c.byte_size, c.media_path, c.created_at, c.ttl, c.synced, c.is_pinned, c.pin_note, c.received_at
+                "SELECT c.id, c.user_id, c.content, c.content_type, c.source, c.label, c.byte_size, c.media_path, c.created_at, c.synced, c.is_pinned, c.pin_note, c.received_at
                  FROM clips c
                  JOIN clips_fts f ON c.rowid = f.rowid
                  WHERE clips_fts MATCH ?1
                  UNION
-                 SELECT c.id, c.user_id, c.content, c.content_type, c.source, c.label, c.byte_size, c.media_path, c.created_at, c.ttl, c.synced, c.is_pinned, c.pin_note, c.received_at
+                 SELECT c.id, c.user_id, c.content, c.content_type, c.source, c.label, c.byte_size, c.media_path, c.created_at, c.synced, c.is_pinned, c.pin_note, c.received_at
                  FROM clips c
                  WHERE c.is_pinned = 1 AND c.pin_note LIKE ?2
                  ORDER BY created_at DESC
@@ -386,11 +394,10 @@ impl Database {
                     byte_size: row.get(6)?,
                     media_path: row.get(7)?,
                     created_at: row.get(8)?,
-                    ttl: row.get(9)?,
-                    synced: row.get::<_, bool>(10).unwrap_or(true),
-                    is_pinned: row.get::<_, i32>(11).unwrap_or(0) != 0,
-                    pin_note: row.get(12)?,
-                    received_at: row.get::<_, i64>(13).unwrap_or(0),
+                    synced: row.get::<_, bool>(9).unwrap_or(true),
+                    is_pinned: row.get::<_, i32>(10).unwrap_or(0) != 0,
+                    pin_note: row.get(11)?,
+                    received_at: row.get::<_, i64>(12).unwrap_or(0),
                 })
             })
             .map_err(|e| format!("search failed: {}", e))?
@@ -451,44 +458,6 @@ impl Database {
         }
 
         Ok(())
-    }
-
-    pub fn cleanup_expired(&self) -> Result<usize, String> {
-        let now = chrono::Utc::now().timestamp();
-        let conn = self.conn.lock().unwrap();
-
-        // First, find media paths of clips about to be deleted
-        let mut stmt = conn
-            .prepare("SELECT media_path FROM clips WHERE ttl > 0 AND (created_at + ttl) < ?1 AND is_pinned = 0 AND media_path IS NOT NULL AND media_path != ''")
-            .map_err(|e| format!("prepare failed: {}", e))?;
-        let media_paths: Vec<String> = stmt
-            .query_map(params![now], |row| row.get(0))
-            .map_err(|e| format!("query failed: {}", e))?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        let deleted = conn
-            .execute(
-                "DELETE FROM clips WHERE ttl > 0 AND (created_at + ttl) < ?1 AND is_pinned = 0",
-                params![now],
-            )
-            .map_err(|e| format!("cleanup failed: {}", e))?;
-
-        // Cascade-delete media files
-        if !media_paths.is_empty() {
-            let media_dir = dirs::data_dir()
-                .unwrap_or_else(|| dirs::home_dir().unwrap().join(".local/share"))
-                .join("com.cinch.app");
-            for mp in &media_paths {
-                let full_path = media_dir.join(mp);
-                let _ = std::fs::remove_file(full_path);
-            }
-        }
-
-        if deleted > 0 {
-            info!("cleaned up {} expired clips", deleted);
-        }
-        Ok(deleted)
     }
 
     /// Delete every clip row with `created_at < cutoff` and cascade-delete
@@ -597,7 +566,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, user_id, content, content_type, source, label, byte_size, media_path, created_at, ttl, synced, is_pinned, pin_note, received_at
+                "SELECT id, user_id, content, content_type, source, label, byte_size, media_path, created_at, synced, is_pinned, pin_note, received_at
                  FROM clips WHERE synced = FALSE ORDER BY created_at ASC",
             )
             .map_err(|e| format!("prepare failed: {}", e))?;
@@ -614,11 +583,10 @@ impl Database {
                     byte_size: row.get(6)?,
                     media_path: row.get(7)?,
                     created_at: row.get(8)?,
-                    ttl: row.get(9)?,
-                    synced: row.get::<_, bool>(10).unwrap_or(true),
-                    is_pinned: row.get::<_, i32>(11).unwrap_or(0) != 0,
-                    pin_note: row.get(12)?,
-                    received_at: row.get::<_, i64>(13).unwrap_or(0),
+                    synced: row.get::<_, bool>(9).unwrap_or(true),
+                    is_pinned: row.get::<_, i32>(10).unwrap_or(0) != 0,
+                    pin_note: row.get(11)?,
+                    received_at: row.get::<_, i64>(12).unwrap_or(0),
                 })
             })
             .map_err(|e| format!("query failed: {}", e))?
@@ -689,11 +657,8 @@ impl Database {
     /// `received_at` wall-clock instead.
     pub fn max_created_at(&self) -> Result<Option<i64>, String> {
         let conn = self.conn.lock().unwrap();
-        let result: rusqlite::Result<Option<i64>> = conn.query_row(
-            "SELECT MAX(created_at) FROM clips",
-            [],
-            |row| row.get(0),
-        );
+        let result: rusqlite::Result<Option<i64>> =
+            conn.query_row("SELECT MAX(created_at) FROM clips", [], |row| row.get(0));
         result.map_err(|e| format!("max_created_at: {}", e))
     }
 
@@ -808,7 +773,6 @@ mod tests {
             byte_size: content.len() as i64,
             media_path: None,
             created_at: chrono::Utc::now().timestamp(),
-            ttl: 0,
             synced: true,
             is_pinned: false,
             pin_note: None,
@@ -1013,21 +977,6 @@ mod tests {
         // Filter by text
         let texts = db.list_clips(None, Some("text"), 50).unwrap();
         assert_eq!(texts.len(), 2);
-    }
-
-    #[test]
-    fn test_cleanup_expired() {
-        let db = test_db();
-        let mut clip = make_clip("c1", "temp", "remote:prod", "text");
-        clip.ttl = 1; // 1 second TTL
-        clip.created_at = chrono::Utc::now().timestamp() - 10; // created 10s ago
-        db.insert_clip(&clip).unwrap();
-
-        let deleted = db.cleanup_expired().unwrap();
-        assert_eq!(deleted, 1);
-
-        let clips = db.list_clips(None, None, 50).unwrap();
-        assert!(clips.is_empty());
     }
 
     // --- Retention methods (plan 01-02) ---

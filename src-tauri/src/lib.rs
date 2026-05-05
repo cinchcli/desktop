@@ -480,18 +480,6 @@ pub fn run() {
                 });
             }
 
-            // Spawn TTL cleanup task (every 60s) — always needed
-            let db_cleanup = db.clone();
-            tauri::async_runtime::spawn(async move {
-                let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
-                loop {
-                    interval.tick().await;
-                    if let Err(e) = db_cleanup.cleanup_expired() {
-                        log::error!("TTL cleanup error: {}", e);
-                    }
-                }
-            });
-
             // Spawn local clipboard monitor — always runs (relay-independent)
             clipboard::monitor::spawn_clipboard_monitor(
                 handle,
