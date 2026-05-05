@@ -449,6 +449,11 @@ pub fn run() {
                                 Ok(n) => info!("startup delta_sync complete: {} clips", n),
                                 Err(e) => log::error!("startup delta_sync failed: {}", e),
                             }
+                            // tombstone sync after delta
+                            match tombstone_sync(&db_delta, &http).await {
+                                Ok(n) => info!("startup tombstone_sync: applied {} deletions", n),
+                                Err(e) => log::warn!("startup tombstone_sync failed: {}", e),
+                            }
                         }
                         Err(e) => log::error!("startup delta_sync: cannot build client: {}", e),
                     }
@@ -641,6 +646,41 @@ pub(crate) fn sanitize_media_path(media_path: &str) -> Result<std::path::PathBuf
         }
     }
     Ok(path.to_path_buf())
+}
+
+async fn tombstone_sync(
+    db: &Arc<store::db::Database>,
+    http: &Arc<client_core::http::RestClient>,
+) -> Result<usize, String> {
+    // Read watermark from settings. Key: "last_tombstone_at" (RFC3339 string).
+    let since = db
+        .get_setting("last_tombstone_at")
+        .ok()
+        .flatten()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc));
+
+    let tombstones = http
+        .list_tombstones(since)
+        .await
+        .map_err(|e| format!("tombstone_sync: {}", e))?;
+
+    let count = tombstones.len();
+    for t in &tombstones {
+        if let Err(e) = db.delete_clip(&t.clip_id) {
+            log::warn!("tombstone_sync: delete_clip {} failed: {}", t.clip_id, e);
+        }
+    }
+
+    // Advance watermark to the latest tombstone's deleted_at.
+    if let Some(last) = tombstones.last() {
+        if let Err(e) = db.set_setting("last_tombstone_at", &last.deleted_at) {
+            log::warn!("tombstone_sync: update watermark failed: {}", e);
+        }
+    }
+
+    log::info!("tombstone_sync: applied {} deletions", count);
+    Ok(count)
 }
 
 const DELTA_PAGE_SIZE: u32 = 100;
