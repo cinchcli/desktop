@@ -20,6 +20,8 @@ use tauri_specta::{collect_commands, collect_events, Builder, Event};
 use auth::{AuthState, AuthStateHandle};
 use protocol::MultiConfigHandle;
 
+pub type PreviousAppPid = Arc<Mutex<Option<i32>>>;
+
 pub fn make_specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
@@ -37,6 +39,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::clips::get_all_source_settings,
             commands::clips::copy_clip_to_clipboard,
             commands::clips::copy_image_to_clipboard,
+            commands::clips::focus_previous_app,
             commands::clips::list_devices,
             commands::clips::set_device_nickname,
             commands::clips::revoke_device,
@@ -120,6 +123,7 @@ pub fn run() {
     let ws_abort_handle = Arc::new(ws::WsAbortHandle::new());
     let pending_relay_add = Arc::new(commands::relays::PendingRelayAdd::new());
     let pending_auth_relay = Arc::new(commands::relays::PendingAuthRelay::new());
+    let previous_app_pid: PreviousAppPid = Arc::new(Mutex::new(None));
 
     // Single clipboard service shared by monitor, ws client, and Tauri commands.
     let clipboard_service = Arc::new(clipboard::ClipboardService::new_platform_default());
@@ -205,6 +209,7 @@ pub fn run() {
         .manage(ws_status.clone())
         .manage(relay_connected.clone())
         .manage(auth_state_handle.clone())
+        .manage(previous_app_pid.clone())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
@@ -222,6 +227,11 @@ pub fn run() {
 
             // Register global shortcuts (⌘⇧V main window focus)
             register_global_shortcuts(handle);
+
+            // Make the window movable by external window managers (Rectangle, Moom, etc.).
+            // decorations:false sets NSWindowStyleMaskBorderless whose default is isMovable=false,
+            // so Rectangle's AX-based "Move to Next Display" silently fails.
+            configure_macos_window(handle);
 
             // Seed AuthState from persisted config. Plan 03 Task 2.
             {
@@ -434,10 +444,7 @@ pub fn run() {
 
             if is_configured {
                 // Show dashboard on launch
-                if let Some(window) = handle.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                show_on_active_monitor(handle);
 
                 // Delta-sync clips from relay on startup (fetches only new clips)
                 let db_delta = db.clone();
@@ -475,10 +482,7 @@ pub fn run() {
                 ws_abort_handle.replace(join);
             } else {
                 // No config — show window immediately with setup instructions
-                if let Some(window) = handle.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                show_on_active_monitor(handle);
                 let h = handle.clone();
                 tauri::async_runtime::spawn(async move {
                     crate::events::WsStatus("unconfigured".into()).emit(&h).ok();
@@ -561,6 +565,121 @@ fn spawn_retention_sweep(db: Arc<store::db::Database>) {
     });
 }
 
+/// Show the main window centered on the monitor that currently has the mouse cursor.
+/// Falls back to simple show+focus if cursor or monitor data is unavailable.
+pub(crate) fn show_on_active_monitor(app: &tauri::AppHandle) {
+    // Capture the frontmost app before Cinch steals focus, so we can restore it on copy.
+    #[cfg(target_os = "macos")]
+    capture_frontmost_app_pid(app);
+
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    let result = (|| -> tauri::Result<()> {
+        let cursor = app.cursor_position()?;
+        let monitors = app.available_monitors()?;
+
+        let target = monitors.iter().find(|m| {
+            let pos = m.position();
+            let size = m.size();
+            cursor.x >= pos.x as f64
+                && cursor.x < pos.x as f64 + size.width as f64
+                && cursor.y >= pos.y as f64
+                && cursor.y < pos.y as f64 + size.height as f64
+        });
+
+        if let Some(monitor) = target {
+            let pos = monitor.position();
+            let size = monitor.size();
+            let win_size = window.outer_size().unwrap_or(tauri::PhysicalSize::new(960, 600));
+            let x = pos.x + ((size.width as i32 - win_size.width as i32) / 2);
+            let y = pos.y + ((size.height as i32 - win_size.height as i32) / 2);
+            window.set_position(tauri::PhysicalPosition::new(x, y))?;
+        }
+        Ok(())
+    })();
+
+    if let Err(e) = result {
+        log::warn!("show_on_active_monitor: could not reposition window: {}", e);
+    }
+
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+/// Configure the NSWindow so that external window managers (Rectangle, Moom, etc.) can
+/// move it via the Accessibility API.
+///
+/// `decorations: false` produces NSWindowStyleMaskBorderless, whose macOS default is
+/// `isMovable = false`. Rectangle calls `AXUIElementSetAttributeValue(kAXPositionAttribute)`
+/// which silently no-ops when `isMovable` is false. Setting it to true fixes "Move to
+/// Next/Previous Display" while leaving mouse drag behavior unchanged.
+///
+/// NSWindowCollectionBehaviorManaged (bit 2) makes the window appear in Mission Control
+/// and participate in Spaces, which some window managers require before they will manage it.
+/// Captures the pid of the macOS frontmost application and stores it in PreviousAppPid state.
+#[cfg(target_os = "macos")]
+fn capture_frontmost_app_pid(app: &tauri::AppHandle) {
+    use objc::runtime::Object;
+    use objc::{class, msg_send, sel, sel_impl};
+
+    let pid: i32 = unsafe {
+        let workspace: *mut Object = msg_send![class!(NSWorkspace), sharedWorkspace];
+        let frontmost: *mut Object = msg_send![workspace, frontmostApplication];
+        if frontmost.is_null() {
+            return;
+        }
+        msg_send![frontmost, processIdentifier]
+    };
+
+    if let Some(state) = app.try_state::<PreviousAppPid>() {
+        if let Ok(mut guard) = state.lock() {
+            *guard = Some(pid);
+        }
+    }
+}
+
+/// Activates a macOS application by its process identifier.
+#[cfg(target_os = "macos")]
+pub(crate) fn activate_app_by_pid(pid: i32) {
+    use objc::runtime::Object;
+    use objc::{class, msg_send, sel, sel_impl};
+
+    unsafe {
+        let app: *mut Object =
+            msg_send![class!(NSRunningApplication), runningApplicationWithProcessIdentifier: pid];
+        if app.is_null() {
+            return;
+        }
+        // NSApplicationActivateIgnoringOtherApps = 2
+        let _: bool = msg_send![app, activateWithOptions: 2u64];
+    }
+}
+
+fn configure_macos_window(app: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        use objc::runtime::{Object, YES};
+        use objc::{msg_send, sel, sel_impl};
+
+        let Some(window) = app.get_webview_window("main") else {
+            return;
+        };
+        let Ok(ns_window_ptr) = window.ns_window() else {
+            return;
+        };
+        unsafe {
+            let ns_window = ns_window_ptr as *mut Object;
+            // Allow AX-based moves (fixes Rectangle "Move to Next/Prev Display")
+            let _: () = msg_send![ns_window, setMovable: YES];
+            // NSWindowCollectionBehaviorManaged=4, NSWindowCollectionBehaviorParticipatesInCycle=32
+            let behavior: u64 = (1 << 2) | (1 << 5);
+            let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
+        }
+    }
+}
+
 fn register_global_shortcuts(app: &tauri::AppHandle) {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
@@ -578,10 +697,7 @@ fn register_global_shortcuts(app: &tauri::AppHandle) {
             .on_shortcut(shortcut_str.as_str(), move |_app, shortcut, event| {
                 if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
                     info!("global shortcut pressed: {}", shortcut);
-                    if let Some(window) = handle.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
+                    show_on_active_monitor(&handle);
                 }
             })
     {

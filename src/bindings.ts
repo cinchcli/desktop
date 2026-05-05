@@ -19,6 +19,11 @@ export const commands = {
 	getAllSourceSettings: () => typedError<SourceSetting[], string>(__TAURI_INVOKE("get_all_source_settings")),
 	copyClipToClipboard: (content: string) => typedError<null, string>(__TAURI_INVOKE("copy_clip_to_clipboard", { content })),
 	copyImageToClipboard: (mediaPath: string) => typedError<null, string>(__TAURI_INVOKE("copy_image_to_clipboard", { mediaPath })),
+	/**
+	 *  Restore focus to the app that was frontmost before Cinch was shown, then hide the
+	 *  Cinch window. On non-macOS platforms this simply hides the window.
+	 */
+	focusPreviousApp: () => typedError<null, string>(__TAURI_INVOKE("focus_previous_app")),
 	listDevices: () => typedError<Device[], string>(__TAURI_INVOKE("list_devices")),
 	setDeviceNickname: (deviceId: string, nickname: string) => typedError<null, string>(__TAURI_INVOKE("set_device_nickname", { deviceId, nickname })),
 	revokeDevice: (deviceId: string) => typedError<null, string>(__TAURI_INVOKE("revoke_device", { deviceId })),

@@ -6,8 +6,10 @@ import type { LocalClip, SourceInfo, Device } from './bindings';
 import { unwrap } from './lib/tauri';
 import { buildTargets, fuzzySearch, parseFromToken } from './lib/fuzzy';
 import { groupByTimeBucket } from './lib/timeBuckets';
+import { applyClipFilter, CLIP_FILTERS, type ClipFilter } from './lib/clipFilters';
+import { useClipFilterRules } from './lib/useClipFilterRules';
 import { C } from './design';
-import { useAuthState, retryAuth, type AuthProgress, type AuthErrorReason } from './state/auth';
+import { useAuthState, retryAuth, signOut, type AuthProgress, type AuthErrorReason } from './state/auth';
 import SettingsPane from './SettingsPane';
 import { LocalOnlyView } from './components/LocalOnlyView';
 import { AdoptedAuthToast } from './components/AdoptedAuthToast';
@@ -114,7 +116,8 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [activePanel, setActivePanel] = useState<RailPanel>('inbox');
-  const [activeFilter, setActiveFilter] = useState<'all' | 'text' | 'image' | 'code' | 'url'>('all');
+  const [activeFilter, setActiveFilter] = useState<ClipFilter>('all');
+  const filterRules = useClipFilterRules();
   const searchRef = useRef<HTMLInputElement>(null);
   const clipListRef = useRef<HTMLDivElement>(null);
   const [toast, setToast] = useState<{ message: string; icon: 'copy' | 'trash' } | null>(null);
@@ -206,7 +209,7 @@ function App() {
       unwrap(commands.copyClipToClipboard(clip.content));
       showToast('Copied to clipboard', 'copy');
     }
-    void getCurrentWindow().hide();
+    void commands.focusPreviousApp();
   }, [showToast]);
 
   const handleDelete = async (id: string) => {
@@ -267,16 +270,8 @@ function App() {
   }, [clips, sourceFilter, parsed.residual, nicknameBySource, activePanel]);
 
   const typeFilteredClips = useMemo(() => {
-    if (activeFilter === 'all') return filteredClips;
-    const filterMap: Record<string, string[]> = {
-      text:  ['text', 'json'],
-      image: ['image'],
-      code:  ['code'],
-      url:   ['url'],
-    };
-    const allowed = filterMap[activeFilter] ?? [];
-    return filteredClips.filter((c) => allowed.includes(c.content_type));
-  }, [filteredClips, activeFilter]);
+    return applyClipFilter(filteredClips, activeFilter, filterRules);
+  }, [filteredClips, activeFilter, filterRules]);
 
   // Arrow-key nav must follow what the user sees. The inbox view groups
   // by time bucket (Today → Yesterday → This week → Older), so flatten
@@ -441,7 +436,7 @@ function App() {
 
       {activePanel === 'inbox' && (
         <div style={S.filterRow}>
-          {(['all', 'text', 'image', 'code', 'url'] as const).map((f) => (
+          {CLIP_FILTERS.map((f) => (
             <button
               key={f}
               style={{ ...S.pill, ...(activeFilter === f ? S.pillActive : {}) }}
@@ -586,7 +581,6 @@ function AuthLoadingScreen({ progress }: { progress: AuthProgress }) {
 
   const handleCancel = async () => {
     try {
-      const { signOut } = await import('./state/auth');
       await signOut();
     } catch (e) {
       console.error('cancel auth failed:', e);
@@ -988,7 +982,7 @@ const S: Record<string, React.CSSProperties> = {
   },
   pillActive: {
     background: C.card2,
-    borderColor: C.borderHover,
+    border: `1px solid ${C.borderHover}`,
     color: C.t1,
   },
   pillDot: {
