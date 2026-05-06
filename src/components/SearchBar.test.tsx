@@ -33,4 +33,38 @@ describe('SearchBar', () => {
     renderBar();
     expect(screen.getByPlaceholderText(/search clips/i)).toBeInTheDocument();
   });
+
+  describe('filter dropdown', () => {
+    it('opens when # is typed in the input', () => {
+      renderBar();
+      const input = screen.getByPlaceholderText(/search clips/i);
+      fireEvent.change(input, { target: { value: '#' } });
+      expect(screen.getByTestId('filter-dropdown')).toBeInTheDocument();
+    });
+
+    it('shows all five filter options when dropdown is open', () => {
+      renderBar();
+      fireEvent.change(screen.getByPlaceholderText(/search clips/i), { target: { value: '#' } });
+      expect(screen.getByTestId('filter-option-all')).toBeInTheDocument();
+      expect(screen.getByTestId('filter-option-text')).toBeInTheDocument();
+      expect(screen.getByTestId('filter-option-image')).toBeInTheDocument();
+      expect(screen.getByTestId('filter-option-code')).toBeInTheDocument();
+      expect(screen.getByTestId('filter-option-url')).toBeInTheDocument();
+    });
+
+    it('strips # from the value passed to onChange', () => {
+      const { onChange } = renderBar({ value: 'hello' });
+      fireEvent.change(screen.getByPlaceholderText(/search clips/i), { target: { value: 'hello#' } });
+      expect(onChange).toHaveBeenCalledWith('hello');
+    });
+
+    it('closes on Escape without calling onFilterChange', () => {
+      const { onFilterChange } = renderBar();
+      const input = screen.getByPlaceholderText(/search clips/i);
+      fireEvent.change(input, { target: { value: '#' } });
+      fireEvent.keyDown(input, { key: 'Escape' });
+      expect(screen.queryByTestId('filter-dropdown')).not.toBeInTheDocument();
+      expect(onFilterChange).not.toHaveBeenCalled();
+    });
+  });
 });
