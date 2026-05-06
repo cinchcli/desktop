@@ -659,4 +659,3 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
     </div>
   );
 }
-

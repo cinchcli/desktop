@@ -843,15 +843,6 @@ async fn flush_offline_queue(app: &AppHandle, db: &Database) {
     }
 }
 
-fn redact_token(url: &str) -> String {
-    if let Some(idx) = url.find("token=") {
-        let prefix = &url[..idx + 6];
-        format!("{}***", prefix)
-    } else {
-        url.to_string()
-    }
-}
-
 /// Testable pure function: classify a WS 401 body string into a Ws401Reason.
 /// Used by the connect_and_listen error handler.
 #[cfg(test)]

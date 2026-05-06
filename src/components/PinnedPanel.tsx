@@ -132,6 +132,7 @@ const S: Record<string, CSSProperties> = {
     gap: 4,
     cursor: 'pointer',
     borderBottom: `1px solid ${C.border}`,
+    outline: 'none',
   },
   rowActive: {
     background: C.selected,
