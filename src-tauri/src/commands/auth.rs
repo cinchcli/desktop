@@ -564,7 +564,12 @@ pub async fn pair_via_ssh(
             .map_err(|e| format!("Writing script: {}", e))?;
     }
 
-    if let Some(stdout) = child.stdout.take() {
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "SSH stdout was not captured".to_string())?;
+    let app_for_stdout = app.clone();
+    let stdout_task = tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
         while let Some(line) = lines
             .next_line()
@@ -572,21 +577,100 @@ pub async fn pair_via_ssh(
             .map_err(|e| format!("Reading output: {}", e))?
         {
             if let Some(marker) = client_core::auth::parse_device_code_marker(&line) {
+                if let Err(e) = tauri_plugin_opener::open_url(&marker.url, None::<&str>) {
+                    log::warn!("pair_via_ssh: failed to open browser: {}", e);
+                }
                 crate::events::SshPairMarkerFound { url: marker.url }
-                    .emit(&app)
+                    .emit(&app_for_stdout)
                     .ok();
+            } else {
+                log::info!("pair_via_ssh stdout: {}", line);
+            }
+        }
+        Ok::<(), String>(())
+    });
+
+    let stderr_task = child.stderr.take().map(|stderr| {
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            let mut recent = std::collections::VecDeque::new();
+            while let Some(line) = lines
+                .next_line()
+                .await
+                .map_err(|e| format!("Reading stderr: {}", e))?
+            {
+                log::warn!("pair_via_ssh stderr: {}", line);
+                if recent.len() == 12 {
+                    recent.pop_front();
+                }
+                recent.push_back(line);
+            }
+            Ok::<Vec<String>, String>(recent.into_iter().collect())
+        })
+    });
+
+    let status = child.wait().await.map_err(|e| format!("SSH wait: {}", e))?;
+    stdout_task
+        .await
+        .map_err(|e| format!("SSH stdout task: {}", e))??;
+    let stderr_tail = if let Some(task) = stderr_task {
+        task.await
+            .map_err(|e| format!("SSH stderr task: {}", e))??
+    } else {
+        Vec::new()
+    };
+    if !status.success() {
+        let mut message = format!("Remote setup failed (exit {})", status.code().unwrap_or(-1));
+        if !stderr_tail.is_empty() {
+            message.push_str(": ");
+            message.push_str(&stderr_tail.join("\n"));
+        }
+        return Err(message);
+    }
+    Ok(())
+}
+
+/// list_ssh_hosts — return concrete aliases from the user's ~/.ssh/config.
+#[tauri::command]
+#[specta::specta]
+pub fn list_ssh_hosts() -> Result<Vec<String>, String> {
+    let Some(home) = dirs::home_dir() else {
+        return Ok(Vec::new());
+    };
+    let config_path = home.join(".ssh").join("config");
+    match std::fs::read_to_string(&config_path) {
+        Ok(config) => Ok(parse_ssh_config_hosts(&config)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(format!("Reading {}: {}", config_path.display(), e)),
+    }
+}
+
+fn parse_ssh_config_hosts(config: &str) -> Vec<String> {
+    let mut hosts = Vec::new();
+    for raw_line in config.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let mut parts = line.split_whitespace();
+        let Some(keyword) = parts.next() else {
+            continue;
+        };
+        if !keyword.eq_ignore_ascii_case("host") {
+            continue;
+        }
+
+        for alias in parts {
+            if alias.starts_with('!') || alias.contains('*') || alias.contains('?') {
+                continue;
+            }
+            if !hosts.iter().any(|existing| existing == alias) {
+                hosts.push(alias.to_string());
             }
         }
     }
-
-    let status = child.wait().await.map_err(|e| format!("SSH wait: {}", e))?;
-    if !status.success() {
-        return Err(format!(
-            "Remote setup failed (exit {})",
-            status.code().unwrap_or(-1)
-        ));
-    }
-    Ok(())
+    hosts
 }
 
 fn build_pair_script(relay_url: &str, skip_install: bool) -> String {
@@ -622,7 +706,32 @@ fi
     }
 
     s.push_str(
-        r#"CINCH_DIR="$HOME/.cinch"
+        r#"find_supported_cinch() {
+  if command -v cinch >/dev/null 2>&1; then
+    CANDIDATE="$(command -v cinch)"
+    if "$CANDIDATE" auth login --help 2>&1 | grep -q -- "--headless"; then
+      printf '%s\n' "$CANDIDATE"
+      return 0
+    fi
+  fi
+
+  for CANDIDATE in "$HOME/.local/bin/cinch" /usr/local/bin/cinch /opt/homebrew/bin/cinch /home/linuxbrew/.linuxbrew/bin/cinch /usr/bin/cinch; do
+    if [ -x "$CANDIDATE" ] && "$CANDIDATE" auth login --help 2>&1 | grep -q -- "--headless"; then
+      printf '%s\n' "$CANDIDATE"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+CINCH_BIN="$(find_supported_cinch)" || {
+  echo "Error: installed cinch does not support SSH pairing." >&2
+  echo "Install or upgrade to a cinch build with 'cinch auth login --headless'." >&2
+  exit 1
+}
+
+CINCH_DIR="$HOME/.cinch"
 CINCH_CONFIG="$CINCH_DIR/config.json"
 mkdir -p "$CINCH_DIR"
 if [ -f "$CINCH_CONFIG" ] && [ -s "$CINCH_CONFIG" ] && command -v jq >/dev/null 2>&1; then
@@ -642,9 +751,49 @@ fi
 chmod 600 "$CINCH_CONFIG"
 
 echo "Authenticating with relay at $RELAY_URL..."
-cinch auth login --headless --relay-url "$RELAY_URL"
+"$CINCH_BIN" auth login --headless --relay-url "$RELAY_URL"
 "#,
     );
 
     s
+}
+
+#[cfg(test)]
+mod ssh_config_tests {
+    use super::*;
+
+    #[test]
+    fn parse_ssh_config_hosts_returns_concrete_aliases_only() {
+        let config = r#"
+Host *
+  AddKeysToAgent yes
+
+Host oci_atlas_1 jgopi
+  User opc
+
+Host 192.168.* ?ast
+  User ignored
+
+Host HomeServer
+  ProxyJump jgopi
+"#;
+
+        assert_eq!(
+            parse_ssh_config_hosts(config),
+            vec![
+                "oci_atlas_1".to_string(),
+                "jgopi".to_string(),
+                "HomeServer".to_string(),
+            ],
+        );
+    }
+
+    #[test]
+    fn build_pair_script_verifies_remote_cinch_supports_headless_login() {
+        let script = build_pair_script("https://api.cinchcli.com", false);
+
+        assert!(script.contains("find_supported_cinch"));
+        assert!(script.contains("does not support SSH pairing"));
+        assert!(script.contains("\"$CINCH_BIN\" auth login --headless --relay-url \"$RELAY_URL\""));
+    }
 }
