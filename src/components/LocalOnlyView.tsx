@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef, type CSSProperties } from "re
 import { commands, events } from "../bindings";
 import type { LocalClip } from "../bindings";
 import { unwrap } from "../lib/tauri";
+import { applyClipFilter, CLIP_FILTERS, type ClipFilter } from "../lib/clipFilters";
 import { C } from "../design";
 import { IconSearch, IconX, IconSun, IconMoon, IconGear, IconCopy, IconTrash } from "../icons";
 import { ClipCard } from "./ClipCard";
@@ -72,7 +73,7 @@ export function LocalOnlyView({ theme, toggleTheme, onOpenSettings }: LocalOnlyV
   const [selectedClip, setSelectedClip] = useState<LocalClip | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [activeFilter, setActiveFilter] = useState<"all" | "text" | "image" | "code" | "url">("all");
+  const [activeFilter, setActiveFilter] = useState<ClipFilter>("all");
   const [loading, setLoading] = useState(true);
   const [upgradePromptDismissed, setUpgradePromptDismissed] = useState(false);
   const [toast, setToast] = useState<{ message: string; icon: "copy" | "trash" } | null>(null);
@@ -108,16 +109,7 @@ export function LocalOnlyView({ theme, toggleTheme, onOpenSettings }: LocalOnlyV
         results = await unwrap(commands.listClips(null, null, 500));
       }
 
-      if (activeFilter !== "all") {
-        const filterMap: Record<string, string[]> = {
-          text:  ["text", "json"],
-          image: ["image"],
-          code:  ["code"],
-          url:   ["url"],
-        };
-        const allowed = filterMap[activeFilter] ?? [];
-        results = results.filter((c) => allowed.includes(c.content_type));
-      }
+      results = applyClipFilter(results, activeFilter);
 
       setClips(results);
     } catch (e) {
@@ -288,7 +280,7 @@ export function LocalOnlyView({ theme, toggleTheme, onOpenSettings }: LocalOnlyV
 
       {/* Filter row */}
       <div style={S.filterRow}>
-        {(["all", "text", "image", "code", "url"] as const).map((f) => (
+        {CLIP_FILTERS.map((f) => (
           <button
             key={f}
             style={{
@@ -436,7 +428,7 @@ const S: Record<string, CSSProperties> = {
   },
   pillActive: {
     background: C.card2,
-    borderColor: C.borderHover,
+    border: `1px solid ${C.borderHover}`,
     color: C.t1,
   },
   pillDot: {

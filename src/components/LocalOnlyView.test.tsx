@@ -130,7 +130,7 @@ describe('LocalOnlyView', () => {
     expect(screen.queryByTestId('loading-skeleton')).not.toBeInTheDocument();
   });
 
-  it('uses customized filter rules from localStorage', async () => {
+  it('ignores saved custom filter rules and uses the default text mapping', async () => {
     localStorage.setItem('cinch-clip-filter-rules', JSON.stringify({
       text: ['text', 'json', 'error'],
       image: ['image'],
@@ -155,7 +155,7 @@ describe('LocalOnlyView', () => {
     await userEvent.click(screen.getByRole('button', { name: 'text' }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Boom/)).toBeInTheDocument();
+      expect(screen.queryByText(/Boom/)).not.toBeInTheDocument();
       expect(screen.queryByText(/Image/)).not.toBeInTheDocument();
     });
   });
