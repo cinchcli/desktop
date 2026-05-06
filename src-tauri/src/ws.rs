@@ -295,42 +295,38 @@ async fn handle_text_message(
             if let Some(mut clip) = msg.clip {
                 // Phase 4.5: decrypt encrypted clips BEFORE any processing
                 if clip.encrypted {
-                    match crate::auth::credential::read_encryption_key(&clip.user_id) {
-                        Ok(key_bytes) => {
-                            if let Ok(key) = <[u8; 32]>::try_from(key_bytes.as_slice()) {
-                                match crate::crypto::decrypt(&key, &clip.content) {
-                                    Ok(plaintext) => {
-                                        // Replace ciphertext with plaintext for all downstream processing.
-                                        // For binary clips (images), encode as base64 to avoid lossy UTF-8
-                                        // corruption of raw binary bytes.
-                                        let is_binary = clip.media_path.is_some()
-                                            || clip.content_type.as_str().starts_with("image");
-                                        if is_binary {
-                                            use base64::Engine;
-                                            clip.content =
-                                                base64::engine::general_purpose::STANDARD
-                                                    .encode(&plaintext);
-                                        } else {
-                                            clip.content = String::from_utf8(plaintext)
-                                                .unwrap_or_else(|e| {
-                                                    String::from_utf8_lossy(e.as_bytes())
-                                                        .to_string()
-                                                });
-                                        }
-                                        // Mark as decrypted — local DB always stores plaintext
-                                        clip.encrypted = false;
+                    match client_core::credstore::read_encryption_key(&clip.user_id) {
+                        Some(key) => {
+                            match crate::crypto::decrypt(&key, &clip.content) {
+                                Ok(plaintext) => {
+                                    // Replace ciphertext with plaintext for all downstream processing.
+                                    // For binary clips (images), encode as base64 to avoid lossy UTF-8
+                                    // corruption of raw binary bytes.
+                                    let is_binary = clip.media_path.is_some()
+                                        || clip.content_type.as_str().starts_with("image");
+                                    if is_binary {
+                                        use base64::Engine;
+                                        clip.content =
+                                            base64::engine::general_purpose::STANDARD
+                                                .encode(&plaintext);
+                                    } else {
+                                        clip.content = String::from_utf8(plaintext)
+                                            .unwrap_or_else(|e| {
+                                                String::from_utf8_lossy(e.as_bytes())
+                                                    .to_string()
+                                            });
                                     }
-                                    Err(e) => {
-                                        error!("clip decryption failed: {}", e);
-                                        // Insert as-is (encrypted) — clip not lost, but content unreadable
-                                    }
+                                    // Mark as decrypted — local DB always stores plaintext
+                                    clip.encrypted = false;
                                 }
-                            } else {
-                                error!("encryption key is not 32 bytes, skipping decryption");
+                                Err(e) => {
+                                    error!("clip decryption failed: {}", e);
+                                    // Insert as-is (encrypted) — clip not lost, but content unreadable
+                                }
                             }
                         }
-                        Err(e) => {
-                            warn!("no encryption key available for decryption: {}", e);
+                        None => {
+                            warn!("no encryption key available for decryption: no credential stored");
                             // Insert as-is — encrypted content visible in UI as base64 garble
                         }
                     }
@@ -547,10 +543,10 @@ async fn handle_text_message(
                     return;
                 }
             };
-            let user_key = match crate::auth::credential::read_encryption_key(&cfg.user_id) {
-                Ok(k) => k,
-                Err(e) => {
-                    error!("no encryption key for key exchange: {}", e);
+            let user_key = match client_core::credstore::read_encryption_key(&cfg.user_id) {
+                Some(k) => k,
+                None => {
+                    error!("no encryption key for key exchange: no credential stored");
                     return;
                 }
             };
@@ -602,7 +598,7 @@ async fn handle_text_message(
                     match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&device_pub) {
                         Ok(raw_pub) => {
                             let digest = sha2::Sha256::digest(&raw_pub);
-                            let fetched_fp = digest[..8]
+                            let fetched_fp = digest[..4]
                                 .iter()
                                 .map(|b| format!("{:02x}", b))
                                 .collect::<String>();
@@ -774,9 +770,7 @@ async fn flush_offline_queue(app: &AppHandle, db: &Database) {
     let relay_url = &config.relay_url;
     let token = &config.token;
 
-    let enc_key: Option<[u8; 32]> = crate::auth::credential::read_encryption_key(&config.user_id)
-        .ok()
-        .and_then(|k| <[u8; 32]>::try_from(k.as_slice()).ok());
+    let enc_key: Option<[u8; 32]> = client_core::credstore::read_encryption_key(&config.user_id);
 
     if enc_key.is_none() {
         let dropped = unsynced.len() as u32;

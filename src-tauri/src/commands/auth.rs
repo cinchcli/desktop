@@ -751,7 +751,7 @@ fi
 chmod 600 "$CINCH_CONFIG"
 
 echo "Authenticating with relay at $RELAY_URL..."
-"$CINCH_BIN" auth login --headless --relay-url "$RELAY_URL"
+"$CINCH_BIN" auth login --headless --relay "$RELAY_URL"
 "#,
     );
 
@@ -794,6 +794,6 @@ Host HomeServer
 
         assert!(script.contains("find_supported_cinch"));
         assert!(script.contains("does not support SSH pairing"));
-        assert!(script.contains("\"$CINCH_BIN\" auth login --headless --relay-url \"$RELAY_URL\""));
+        assert!(script.contains("\"$CINCH_BIN\" auth login --headless --relay \"$RELAY_URL\""));
     }
 }
