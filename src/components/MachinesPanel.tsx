@@ -3,7 +3,7 @@ import { commands } from '../bindings';
 import { unwrap } from '../lib/tauri';
 import { C, formatTime } from '../design';
 import { sourcePillVars } from '../lib/sourceColor';
-import type { Device, SourceInfo } from '../bindings';
+import type { Device, SourceAlertSetting, SourceInfo } from '../bindings';
 import ConfirmDialog from '../ConfirmDialog';
 import { AddSshMachineDialog } from './AddSshMachineDialog';
 
@@ -22,6 +22,10 @@ type MergedEntry =
   | { kind: 'source_only'; source: SourceInfo }
   | { kind: 'local' };
 
+function settingsToAlertMap(settings: SourceAlertSetting[]): Record<string, boolean> {
+  return Object.fromEntries(settings.map((s) => [s.source, s.alert_enabled]));
+}
+
 // ─── MachinesPanel ────────────────────────────────────────
 
 export function MachinesPanel({
@@ -31,6 +35,7 @@ export function MachinesPanel({
 }: MachinesPanelProps) {
   const [devices, setDevices] = useState<Device[]>([]);
   const [sources, setSources] = useState<SourceInfo[]>([]);
+  const [alertSettings, setAlertSettings] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -47,12 +52,16 @@ export function MachinesPanel({
 
   const fetchAll = useCallback(async () => {
     try {
-      const [devs, srcs] = await Promise.allSettled([
+      const [devs, srcs, alerts] = await Promise.allSettled([
         unwrap(commands.listDevices()),
         unwrap(commands.getSources()),
+        unwrap(commands.getAllSourceAlertSettings()),
       ]);
       if (devs.status === 'fulfilled') setDevices(devs.value);
       if (srcs.status === 'fulfilled') setSources(srcs.value);
+      if (alerts.status === 'fulfilled') {
+        setAlertSettings(settingsToAlertMap(alerts.value));
+      }
     } catch (e) {
       console.error('fetchAll failed:', e);
     } finally {
@@ -139,6 +148,26 @@ export function MachinesPanel({
       setConfirmingRevokeId(null);
     },
     [fetchAll, onDeviceChange, onShowToast],
+  );
+
+  const isAlertEnabled = useCallback(
+    (source: string) => alertSettings[source] ?? true,
+    [alertSettings],
+  );
+
+  const toggleAlert = useCallback(
+    async (source: string, name: string) => {
+      const next = !isAlertEnabled(source);
+      setAlertSettings((prev) => ({ ...prev, [source]: next }));
+      try {
+        await unwrap(commands.setSourceAlertEnabled(source, next));
+        onShowToast(next ? `Desktop alerts on for ${name}` : `Desktop alerts off for ${name}`);
+      } catch (_e) {
+        setAlertSettings((prev) => ({ ...prev, [source]: !next }));
+        onShowToast('Failed to save alert setting');
+      }
+    },
+    [isAlertEnabled, onShowToast],
   );
 
   // ── Nickname edit interaction ───────────────────────────
@@ -342,6 +371,11 @@ export function MachinesPanel({
                   {s.clip_count} clips · {formatTime(s.last_seen)}
                 </div>
                 <div style={S.cardFooter}>
+                  <AlertToggle
+                    enabled={isAlertEnabled(s.source)}
+                    name={name}
+                    onClick={() => toggleAlert(s.source, name)}
+                  />
                   <span style={{ ...S.thisDeviceBadge, color: C.t4 }}>
                     Not paired
                   </span>
@@ -356,6 +390,8 @@ export function MachinesPanel({
           const isEditing = editingDeviceId === device.id;
           const displayName = device.nickname || device.hostname || '';
           const pillVars = sourcePillVars(device.source_key ?? device.id ?? '');
+          const alertSource = device.source_key;
+          const alertName = device.hostname || displayName || 'machine';
 
           return (
             <div key={device.id} role="listitem" style={S.card}>
@@ -431,6 +467,13 @@ export function MachinesPanel({
               </div>
 
               <div style={S.cardFooter}>
+                {alertSource && (
+                  <AlertToggle
+                    enabled={isAlertEnabled(alertSource)}
+                    name={alertName}
+                    onClick={() => toggleAlert(alertSource, alertName)}
+                  />
+                )}
                 <button
                   style={S.revokeBtn}
                   onClick={() => setConfirmingRevokeId(device.id ?? null)}
@@ -485,6 +528,27 @@ export function MachinesPanel({
         onCancel={() => setConfirmingRevokeId(null)}
       />
     </div>
+  );
+}
+
+function AlertToggle({
+  enabled,
+  name,
+  onClick,
+}: {
+  enabled: boolean;
+  name: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      style={{ ...S.alertBtn, ...(enabled ? S.alertBtnOn : S.alertBtnOff) }}
+      onClick={onClick}
+      aria-label={`${enabled ? 'Turn desktop alerts off' : 'Turn desktop alerts on'} for ${name}`}
+    >
+      {enabled ? 'Alerts on' : 'Alerts off'}
+    </button>
   );
 }
 
@@ -653,6 +717,24 @@ const S: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     fontFamily: 'var(--font-body)',
     whiteSpace: 'nowrap',
+  },
+  alertBtn: {
+    background: 'transparent',
+    borderRadius: 6,
+    padding: '4px 8px',
+    fontSize: 12,
+    fontWeight: 500,
+    cursor: 'pointer',
+    fontFamily: 'var(--font-body)',
+    whiteSpace: 'nowrap',
+  },
+  alertBtnOn: {
+    color: C.t2,
+    border: `1px solid ${C.border}`,
+  },
+  alertBtnOff: {
+    color: C.t4,
+    border: `1px solid ${C.border}`,
   },
 
   pairCard: {

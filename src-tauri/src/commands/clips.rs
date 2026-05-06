@@ -6,7 +6,7 @@ use tauri::State;
 
 use crate::clipboard::ClipboardService;
 use crate::protocol::{ConfigInfo, DeviceInfo, MultiConfigHandle};
-use crate::store::db::{Database, SourceInfo, SourceSetting};
+use crate::store::db::{Database, SourceAlertSetting, SourceInfo, SourceSetting};
 use crate::store::models::LocalClip;
 use crate::ws::WsStatus;
 
@@ -267,6 +267,39 @@ pub fn set_source_auto_copy(
 #[specta::specta]
 pub fn get_all_source_settings(db: State<'_, Arc<Database>>) -> Result<Vec<SourceSetting>, String> {
     db.get_all_source_settings()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_source_alert_enabled(
+    db: State<'_, Arc<Database>>,
+    source: String,
+) -> Result<bool, String> {
+    db.is_source_alert_enabled(&source)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_source_alert_enabled(
+    db: State<'_, Arc<Database>>,
+    source: String,
+    enabled: bool,
+) -> Result<(), String> {
+    db.set_source_alert_enabled(&source, enabled)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_all_source_alert_settings(
+    db: State<'_, Arc<Database>>,
+) -> Result<Vec<SourceAlertSetting>, String> {
+    db.get_all_source_alert_settings()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn mark_clip_copied(db: State<'_, Arc<Database>>, id: String) -> Result<(), String> {
+    db.mark_clip_copied(&id, chrono::Utc::now().timestamp())
 }
 
 #[tauri::command]

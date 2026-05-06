@@ -50,6 +50,18 @@ describe('groupByTimeBucket', () => {
     expect(result[0].items.map(c => c.id)).toEqual(['a', 'b', 'c']);
   });
 
+  it('uses received_at for recency when a historical clip was copied again', () => {
+    const oldCopiedAgain = {
+      id: 'old',
+      created_at: NOW - 3600 * 24 * 30,
+      received_at: NOW - 60,
+    };
+    const result = groupByTimeBucket([oldCopiedAgain], NOW);
+    expect(result).toEqual([
+      { bucket: 'Today', items: [oldCopiedAgain] },
+    ]);
+  });
+
   it('returns buckets in chronological order: Today, Yesterday, This week, Older', () => {
     const result = groupByTimeBucket(
       [

@@ -67,6 +67,7 @@ interface ClipRowProps {
 
 function ClipRow({ clip, selected, onClick, onDoubleClick, nickname }: ClipRowProps) {
   const isImage = clip.content_type === 'image' && !!clip.media_path;
+  const recency = clip.received_at && clip.received_at > 0 ? clip.received_at : clip.created_at;
   const preview = isImage
     ? `Image (${formatBytes(clip.byte_size)})`
     : clip.content.replace(/\s+/g, ' ').trim().substring(0, 140);
@@ -85,7 +86,7 @@ function ClipRow({ clip, selected, onClick, onDoubleClick, nickname }: ClipRowPr
       <span style={S.meta}>
         <SourcePill source={clip.source} status={clip.source === 'local' ? 'local' : 'remote'} nickname={nickname} />
         <span style={{ color: C.t4 }}>·</span>
-        <span>{formatTime(clip.created_at)}</span>
+        <span>{formatTime(recency)}</span>
       </span>
     </div>
   );

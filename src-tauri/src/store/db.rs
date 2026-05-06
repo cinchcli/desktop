@@ -271,7 +271,7 @@ impl Database {
             param_values.push(Box::new(ctype.to_string()));
         }
 
-        sql.push_str(" ORDER BY created_at DESC LIMIT ?");
+        sql.push_str(" ORDER BY received_at DESC, created_at DESC LIMIT ?");
         param_values.push(Box::new(limit));
 
         let params_refs: Vec<&dyn rusqlite::types::ToSql> =
@@ -701,6 +701,19 @@ impl Database {
         self.set_setting(&key, if enabled { "true" } else { "false" })
     }
 
+    pub fn is_source_alert_enabled(&self, source: &str) -> Result<bool, String> {
+        let key = format!("alert_enabled:{}", source);
+        match self.get_setting(&key)? {
+            Some(val) => Ok(val == "true"),
+            None => Ok(true),
+        }
+    }
+
+    pub fn set_source_alert_enabled(&self, source: &str, enabled: bool) -> Result<(), String> {
+        let key = format!("alert_enabled:{}", source);
+        self.set_setting(&key, if enabled { "true" } else { "false" })
+    }
+
     /// Returns true if this source has never had an auto_copy setting saved.
     pub fn is_source_new(&self, source: &str) -> Result<bool, String> {
         let key = format!("auto_copy:{}", source);
@@ -730,6 +743,42 @@ impl Database {
 
         Ok(settings)
     }
+
+    pub fn get_all_source_alert_settings(&self) -> Result<Vec<SourceAlertSetting>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT key, value FROM settings WHERE key LIKE 'alert_enabled:%'")
+            .map_err(|e| format!("prepare failed: {}", e))?;
+
+        let settings = stmt
+            .query_map([], |row| {
+                let key: String = row.get(0)?;
+                let value: String = row.get(1)?;
+                let source = key
+                    .strip_prefix("alert_enabled:")
+                    .unwrap_or(&key)
+                    .to_string();
+                Ok(SourceAlertSetting {
+                    source,
+                    alert_enabled: value == "true",
+                })
+            })
+            .map_err(|e| format!("query failed: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(settings)
+    }
+
+    pub fn mark_clip_copied(&self, id: &str, copied_at: i64) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE clips SET received_at = ?2 WHERE id = ?1",
+            params![id, copied_at],
+        )
+        .map_err(|e| format!("mark_clip_copied failed: {}", e))?;
+        Ok(())
+    }
 }
 
 use serde::{Deserialize, Serialize};
@@ -746,6 +795,12 @@ pub struct SourceInfo {
 pub struct SourceSetting {
     pub source: String,
     pub auto_copy: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct SourceAlertSetting {
+    pub source: String,
+    pub alert_enabled: bool,
 }
 
 #[cfg(test)]
@@ -884,6 +939,45 @@ mod tests {
         db.set_source_auto_copy("remote:staging", true).unwrap();
         let settings = db.get_all_source_settings().unwrap();
         assert_eq!(settings.len(), 2);
+    }
+
+    #[test]
+    fn test_source_alert_enabled_defaults_on_and_can_be_disabled() {
+        let db = test_db();
+
+        assert!(db.is_source_alert_enabled("remote:prod").unwrap());
+
+        db.set_source_alert_enabled("remote:prod", false).unwrap();
+        assert!(!db.is_source_alert_enabled("remote:prod").unwrap());
+
+        db.set_source_alert_enabled("remote:prod", true).unwrap();
+        assert!(db.is_source_alert_enabled("remote:prod").unwrap());
+
+        let settings = db.get_all_source_alert_settings().unwrap();
+        assert_eq!(settings.len(), 1);
+        assert_eq!(settings[0].source, "remote:prod");
+        assert!(settings[0].alert_enabled);
+    }
+
+    #[test]
+    fn test_mark_clip_copied_updates_received_at_for_local_recency_without_changing_created_at() {
+        let db = test_db();
+        let mut old = make_clip("old", "old content", "remote:prod", "text");
+        old.created_at = 100;
+        old.received_at = 100;
+        db.insert_clip(&old).unwrap();
+
+        let mut new = make_clip("new", "new content", "remote:prod", "text");
+        new.created_at = 200;
+        new.received_at = 200;
+        db.insert_clip(&new).unwrap();
+
+        db.mark_clip_copied("old", 300).unwrap();
+
+        let clips = db.list_clips(None, None, 50).unwrap();
+        assert_eq!(clips[0].id, "old");
+        assert_eq!(clips[0].created_at, 100);
+        assert_eq!(clips[0].received_at, 300);
     }
 
     #[test]

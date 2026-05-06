@@ -395,15 +395,18 @@ async fn handle_text_message(
                     let mut state = state.lock().unwrap();
                     tray::update_tray_clip(app, &clip);
 
-                    if is_new_source {
-                        // Always notify for a new source
-                        tray::show_notification(app, &clip);
-                    } else if !should_auto_copy {
-                        // Source has auto-copy OFF — always notify so user can act
-                        tray::show_notification(app, &clip);
-                    } else if state.should_notify(&clip.source) {
-                        // Auto-copy ON — use normal throttle
-                        tray::show_notification(app, &clip);
+                    let alert_enabled = db.is_source_alert_enabled(&clip.source).unwrap_or(true);
+                    if alert_enabled {
+                        if is_new_source {
+                            // Always notify for a new source
+                            tray::show_notification(app, &clip);
+                        } else if !should_auto_copy {
+                            // Source has auto-copy OFF — always notify so user can act
+                            tray::show_notification(app, &clip);
+                        } else if state.should_notify(&clip.source) {
+                            // Auto-copy ON — use normal throttle
+                            tray::show_notification(app, &clip);
+                        }
                     }
 
                     state.add_clip(clip.clone());

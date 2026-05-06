@@ -153,7 +153,7 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
             <IconX size={12} />
           </button>
         )}
-        <kbd style={S.kbd}>⌘F</kbd>
+        <kbd style={S.kbd}>⌘F /</kbd>
         <button
           type="button"
           onClick={onToggleTheme}
