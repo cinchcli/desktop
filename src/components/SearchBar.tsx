@@ -1,6 +1,7 @@
 import { forwardRef, type CSSProperties } from 'react';
 import { C } from '../design';
 import { IconSearch, IconX, IconSun, IconMoon } from '../icons';
+import { type ClipFilter } from '../lib/clipFilters';
 
 interface SearchBarProps {
   value: string;
@@ -9,10 +10,12 @@ interface SearchBarProps {
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
   onMouseDown: (e: React.MouseEvent) => void;
+  activeFilter: ClipFilter;
+  onFilterChange: (f: ClipFilter) => void;
 }
 
 export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
-  ({ value, onChange, onClear, theme, onToggleTheme, onMouseDown }, ref) => {
+  ({ value, onChange, onClear, theme, onToggleTheme, onMouseDown, activeFilter: _activeFilter, onFilterChange: _onFilterChange }, ref) => {
     return (
       <div style={S.bar} onMouseDown={onMouseDown} data-testid="search-bar">
         <span style={S.glass}><IconSearch size={14} /></span>
