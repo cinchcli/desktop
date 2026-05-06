@@ -97,8 +97,23 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
           rm certificate.p12
 
+      - name: Verify Apple notarization credentials
+        if: runner.os == 'macOS'
+        timeout-minutes: 2
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcrun notarytool history \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --output-format json 2>&1 | head -5
+          echo "Notarization credentials verified"
+
       - name: Build Tauri app
-        timeout-minutes: 90
+        timeout-minutes: 60
         uses: tauri-apps/tauri-action@51a9f1156b33df106d827c3a78f8f894946c5faa # action-v0.5.25 (node20, avoids node24 top-level-await crash in v0.6.x)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -116,7 +131,7 @@ jobs:
           releaseBody: 'See the assets below to download the Cinch desktop app.'
           releaseDraft: false
           prerelease: false
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} --skip-stapling
 
   update-cask:
     needs: build-tauri
