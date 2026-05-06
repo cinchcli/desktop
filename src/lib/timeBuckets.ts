@@ -7,6 +7,7 @@ export interface BucketGroup<T> {
 
 export interface Timestamped {
   created_at: number; // unix seconds
+  received_at?: number; // unix seconds, local recency for copied-again clips
 }
 
 const ORDER: TimeBucket[] = ['Today', 'Yesterday', 'This week', 'Older'];
@@ -27,7 +28,8 @@ export function groupByTimeBucket<T extends Timestamped>(
   if (items.length === 0) return [];
   const map = new Map<TimeBucket, T[]>();
   for (const it of items) {
-    const b = bucketOf(nowUnixSeconds - it.created_at);
+    const recency = it.received_at && it.received_at > 0 ? it.received_at : it.created_at;
+    const b = bucketOf(nowUnixSeconds - recency);
     const arr = map.get(b);
     if (arr) arr.push(it);
     else map.set(b, [it]);

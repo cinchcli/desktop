@@ -207,8 +207,13 @@ function App() {
       unwrap(commands.copyClipToClipboard(clip.content));
       showToast('Copied to clipboard', 'copy');
     }
+    setSearchQuery('');
+    setDebouncedQuery('');
+    void unwrap(commands.markClipCopied(clip.id))
+      .then(refreshClips)
+      .catch((e) => console.error('failed to mark clip copied:', e));
     void commands.focusPreviousApp();
-  }, [showToast]);
+  }, [showToast, refreshClips]);
 
   const handleDelete = async (id: string) => {
     await unwrap(commands.deleteClip(id));
@@ -282,10 +287,23 @@ function App() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isTextEntry =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        !!target?.isContentEditable;
+
       if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
         e.preventDefault();
         searchRef.current?.focus();
         searchRef.current?.select();
+      }
+      if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey && !isTextEntry) {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+        return;
       }
       if (e.key === 'Escape') {
         if (showShortcuts) { setShowShortcuts(false); return; }
@@ -506,7 +524,7 @@ function App() {
               { keys: '?', label: 'shortcuts' },
             ]
           : [
-              { keys: '⌘F', label: 'search' },
+              { keys: '⌘F /', label: 'search' },
               { keys: '↑↓', label: 'navigate' },
               { keys: '?', label: 'shortcuts' },
             ]}
@@ -758,7 +776,7 @@ function ShortcutPanel({ onClose }: { onClose: () => void }) {
     {
       title: 'Search',
       rows: [
-        { keys: ['⌘F'], label: 'Focus search' },
+        { keys: ['⌘F', '/'], label: 'Focus search' },
         { keys: ['Esc'], label: 'Clear search / deselect' },
       ],
     },

@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { invoke } from '@tauri-apps/api/core';
 import App from './App';
 import { useAuthState, type AuthState } from './state/auth';
+import type { LocalClip } from './bindings';
 
 // Mock the auth module: AuthProvider becomes a pass-through; useAuthState is type-safely mocked.
 vi.mock('./state/auth', () => ({
@@ -37,6 +39,14 @@ vi.mock('@tauri-apps/api/window', () => ({
 describe('App', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        Element.prototype.scrollIntoView = vi.fn();
+        vi.mocked(invoke).mockImplementation((cmd) => {
+            if (cmd === 'list_clips' || cmd === 'list_pinned_clips' || cmd === 'get_sources' || cmd === 'list_devices') {
+                return Promise.resolve([]);
+            }
+            if (cmd === 'get_ws_status') return Promise.resolve('connected');
+            return Promise.resolve();
+        });
     });
 
     it('renders LocalOnlyView on LocalOnly variant', async () => {
@@ -89,5 +99,59 @@ describe('App', () => {
             expect(screen.getByText(/relay unreachable/i)).toBeInTheDocument();
         });
         expect(screen.getByRole('button', { name: /retry now/i })).toBeInTheDocument();
+    });
+
+    it('focuses search when / is pressed outside text input', async () => {
+        const state: AuthState = {
+            variant: 'Authenticated',
+            payload: { user_id: 'u1', device_id: 'd1', hostname: 'h', relay_url: 'http://localhost:8080', active_relay_id: 'r1' },
+        };
+        vi.mocked(useAuthState).mockReturnValue(state);
+        render(<App />);
+
+        const input = await screen.findByLabelText('Search clips');
+        input.blur();
+        fireEvent.keyDown(window, { key: '/' });
+
+        expect(input).toHaveFocus();
+    });
+
+    it('clears the search query after copying the selected search result with Enter', async () => {
+        const clip: LocalClip = {
+            id: 'c1',
+            user_id: 'u1',
+            content: 'needle clip',
+            content_type: 'text',
+            source: 'local',
+            label: '',
+            byte_size: 11,
+            media_path: null,
+            created_at: 1_777_614_529,
+            synced: true,
+            is_pinned: false,
+            pin_note: null,
+            received_at: 1_777_614_529,
+        };
+        vi.mocked(invoke).mockImplementation((cmd) => {
+            if (cmd === 'list_clips') return Promise.resolve([clip]);
+            if (cmd === 'list_pinned_clips' || cmd === 'get_sources' || cmd === 'list_devices') return Promise.resolve([]);
+            if (cmd === 'get_ws_status') return Promise.resolve('connected');
+            return Promise.resolve();
+        });
+        const state: AuthState = {
+            variant: 'Authenticated',
+            payload: { user_id: 'u1', device_id: 'd1', hostname: 'h', relay_url: 'http://localhost:8080', active_relay_id: 'r1' },
+        };
+        vi.mocked(useAuthState).mockReturnValue(state);
+        render(<App />);
+
+        const input = await screen.findByLabelText('Search clips');
+        fireEvent.change(input, { target: { value: 'needle' } });
+        const row = await screen.findByRole('button', { name: /needle clip/i });
+        fireEvent.click(row);
+        fireEvent.keyDown(window, { key: 'Enter' });
+
+        await waitFor(() => expect(input).toHaveValue(''));
+        expect(invoke).toHaveBeenCalledWith('mark_clip_copied', { id: 'c1' });
     });
 });

@@ -17,6 +17,10 @@ export const commands = {
 	getSourceAutoCopy: (source: string) => typedError<boolean, string>(__TAURI_INVOKE("get_source_auto_copy", { source })),
 	setSourceAutoCopy: (source: string, enabled: boolean) => typedError<null, string>(__TAURI_INVOKE("set_source_auto_copy", { source, enabled })),
 	getAllSourceSettings: () => typedError<SourceSetting[], string>(__TAURI_INVOKE("get_all_source_settings")),
+	getSourceAlertEnabled: (source: string) => typedError<boolean, string>(__TAURI_INVOKE("get_source_alert_enabled", { source })),
+	setSourceAlertEnabled: (source: string, enabled: boolean) => typedError<null, string>(__TAURI_INVOKE("set_source_alert_enabled", { source, enabled })),
+	getAllSourceAlertSettings: () => typedError<SourceAlertSetting[], string>(__TAURI_INVOKE("get_all_source_alert_settings")),
+	markClipCopied: (id: string) => typedError<null, string>(__TAURI_INVOKE("mark_clip_copied", { id })),
 	copyClipToClipboard: (content: string) => typedError<null, string>(__TAURI_INVOKE("copy_clip_to_clipboard", { content })),
 	copyImageToClipboard: (mediaPath: string) => typedError<null, string>(__TAURI_INVOKE("copy_image_to_clipboard", { mediaPath })),
 	/**
@@ -236,6 +240,11 @@ export type PairWithTokenResult = {
 export type RetentionConfig = {
 	local_days: number,
 	remote_days: number,
+};
+
+export type SourceAlertSetting = {
+	source: string,
+	alert_enabled: boolean,
 };
 
 export type SourceInfo = {

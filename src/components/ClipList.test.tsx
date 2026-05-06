@@ -5,21 +5,25 @@ import type { LocalClip } from '../bindings';
 
 const NOW = 1_777_614_529; // matches our visual companion timestamp roughly
 
-const clip = (overrides: Partial<LocalClip>): LocalClip => ({
-  id: 'c1',
-  content: 'hello world',
-  content_type: 'text',
-  byte_size: 11,
-  source: 'local',
-  created_at: NOW - 60,
-  is_pinned: false,
-  pin_note: null,
-  media_path: null,
-  user_id: 'u1',
-  label: '',
-  synced: false,
-  ...overrides,
-});
+const clip = (overrides: Partial<LocalClip>): LocalClip => {
+  const createdAt = overrides.created_at ?? NOW - 60;
+  return {
+    id: 'c1',
+    content: 'hello world',
+    content_type: 'text',
+    byte_size: 11,
+    source: 'local',
+    created_at: createdAt,
+    is_pinned: false,
+    pin_note: null,
+    media_path: null,
+    user_id: 'u1',
+    label: '',
+    synced: false,
+    received_at: overrides.received_at ?? createdAt,
+    ...overrides,
+  };
+};
 
 describe('ClipList', () => {
   it('renders empty state when no clips and no query', () => {
@@ -50,6 +54,22 @@ describe('ClipList', () => {
     );
     expect(screen.getByText('Today')).toBeInTheDocument();
     expect(screen.getByText('Yesterday')).toBeInTheDocument();
+  });
+
+  it('groups copied-again historical clips by received_at recency', () => {
+    render(
+      <ClipList
+        clips={[clip({ id: 'old', created_at: NOW - 86400 * 30, received_at: NOW - 60 })]}
+        selected={null}
+        onSelect={() => {}}
+        onCopy={() => {}}
+        query=""
+        deviceNicknames={{}}
+        now={NOW}
+      />
+    );
+    expect(screen.getByText('Today')).toBeInTheDocument();
+    expect(screen.queryByText('Older')).not.toBeInTheDocument();
   });
 
   it('marks the selected clip with aria-selected', () => {
