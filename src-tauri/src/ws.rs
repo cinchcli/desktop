@@ -306,14 +306,12 @@ async fn handle_text_message(
                                         || clip.content_type.as_str().starts_with("image");
                                     if is_binary {
                                         use base64::Engine;
-                                        clip.content =
-                                            base64::engine::general_purpose::STANDARD
-                                                .encode(&plaintext);
+                                        clip.content = base64::engine::general_purpose::STANDARD
+                                            .encode(&plaintext);
                                     } else {
-                                        clip.content = String::from_utf8(plaintext)
-                                            .unwrap_or_else(|e| {
-                                                String::from_utf8_lossy(e.as_bytes())
-                                                    .to_string()
+                                        clip.content =
+                                            String::from_utf8(plaintext).unwrap_or_else(|e| {
+                                                String::from_utf8_lossy(e.as_bytes()).to_string()
                                             });
                                     }
                                     // Mark as decrypted — local DB always stores plaintext
@@ -326,7 +324,9 @@ async fn handle_text_message(
                             }
                         }
                         None => {
-                            warn!("no encryption key available for decryption: no credential stored");
+                            warn!(
+                                "no encryption key available for decryption: no credential stored"
+                            );
                             // Insert as-is — encrypted content visible in UI as base64 garble
                         }
                     }
