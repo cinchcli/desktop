@@ -7,7 +7,6 @@ import { unwrap } from './lib/tauri';
 import { buildTargets, fuzzySearch, parseFromToken } from './lib/fuzzy';
 import { groupByTimeBucket } from './lib/timeBuckets';
 import { applyClipFilter, CLIP_FILTERS, type ClipFilter } from './lib/clipFilters';
-import { useClipFilterRules } from './lib/useClipFilterRules';
 import { C } from './design';
 import { useAuthState, retryAuth, signOut, type AuthProgress, type AuthErrorReason } from './state/auth';
 import SettingsPane from './SettingsPane';
@@ -117,7 +116,6 @@ function App() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [activePanel, setActivePanel] = useState<RailPanel>('inbox');
   const [activeFilter, setActiveFilter] = useState<ClipFilter>('all');
-  const filterRules = useClipFilterRules();
   const searchRef = useRef<HTMLInputElement>(null);
   const clipListRef = useRef<HTMLDivElement>(null);
   const [toast, setToast] = useState<{ message: string; icon: 'copy' | 'trash' } | null>(null);
@@ -270,8 +268,8 @@ function App() {
   }, [clips, sourceFilter, parsed.residual, nicknameBySource, activePanel]);
 
   const typeFilteredClips = useMemo(() => {
-    return applyClipFilter(filteredClips, activeFilter, filterRules);
-  }, [filteredClips, activeFilter, filterRules]);
+    return applyClipFilter(filteredClips, activeFilter);
+  }, [filteredClips, activeFilter]);
 
   // Arrow-key nav must follow what the user sees. The inbox view groups
   // by time bucket (Today → Yesterday → This week → Older), so flatten
@@ -307,6 +305,15 @@ function App() {
       if ((e.metaKey || e.ctrlKey) && e.key === ',') {
         e.preventDefault();
         setShowSettings(v => !v);
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && (e.key === '1' || e.key === '2' || e.key === '3')) {
+        e.preventDefault();
+        const panels: RailPanel[] = ['inbox', 'pinned', 'machines'];
+        const panel = panels[parseInt(e.key) - 1];
+        setActivePanel(panel);
+        setSelectedClip(null);
+        setSelectedSource(null);
         return;
       }
       if (
@@ -432,6 +439,8 @@ function App() {
         theme={theme}
         onToggleTheme={toggleTheme}
         onMouseDown={handleWindowDrag}
+        activeFilter={activeFilter}
+        onFilterChange={setActiveFilter}
       />
 
       {activePanel === 'inbox' && (
@@ -747,6 +756,9 @@ function ShortcutPanel({ onClose }: { onClose: () => void }) {
         { keys: ['↑', '↓'], label: 'Move between clips' },
         { keys: ['^J', '^K'], label: 'Move between clips (vim)' },
         { keys: ['^H', '^L'], label: 'Cycle source filter' },
+        { keys: ['⌘1'], label: 'Go to Inbox' },
+        { keys: ['⌘2'], label: 'Go to Pinned' },
+        { keys: ['⌘3'], label: 'Go to Machines' },
         { keys: ['⇥'], label: 'Next panel (Inbox → Pinned → Machines)' },
         { keys: ['⇧⇥'], label: 'Previous panel' },
       ],
