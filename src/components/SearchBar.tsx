@@ -72,11 +72,13 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
 
       if (e.key === 'ArrowDown') {
         e.preventDefault();
+        if (matchingFilters.length === 0) return;
         setHighlightedFilter(matchingFilters[(safeIdx + 1) % matchingFilters.length]);
         return;
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault();
+        if (matchingFilters.length === 0) return;
         setHighlightedFilter(matchingFilters[(safeIdx - 1 + matchingFilters.length) % matchingFilters.length]);
         return;
       }
@@ -270,7 +272,7 @@ const S: Record<string, CSSProperties> = {
   },
   dropdown: {
     position: 'absolute',
-    top: 50,
+    top: '100%',
     left: 0,
     right: 0,
     background: C.card2,
