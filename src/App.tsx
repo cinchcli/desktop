@@ -6,7 +6,7 @@ import type { LocalClip, SourceInfo, Device } from './bindings';
 import { unwrap } from './lib/tauri';
 import { buildTargets, fuzzySearch, parseFromToken } from './lib/fuzzy';
 import { groupByTimeBucket } from './lib/timeBuckets';
-import { applyClipFilter, CLIP_FILTERS, type ClipFilter } from './lib/clipFilters';
+import { applyClipFilter, type ClipFilter } from './lib/clipFilters';
 import { C } from './design';
 import { useAuthState, retryAuth, signOut, type AuthProgress, type AuthErrorReason } from './state/auth';
 import SettingsPane from './SettingsPane';
@@ -442,22 +442,6 @@ function App() {
         activeFilter={activeFilter}
         onFilterChange={setActiveFilter}
       />
-
-      {activePanel === 'inbox' && (
-        <div style={S.filterRow}>
-          {CLIP_FILTERS.map((f) => (
-            <button
-              key={f}
-              style={{ ...S.pill, ...(activeFilter === f ? S.pillActive : {}) }}
-              onClick={() => setActiveFilter(f)}
-              aria-pressed={activeFilter === f}
-            >
-              <span style={{ ...S.pillDot, ...S[`dot_${f}`] }} />
-              {f}
-            </button>
-          ))}
-        </div>
-      )}
 
       <div style={S.body}>
         <Rail
@@ -965,50 +949,7 @@ const S: Record<string, React.CSSProperties> = {
     minHeight: 0,
     overflow: 'hidden',
   },
-  filterRow: {
-    display: 'flex',
-    alignItems: 'center',
-    height: 36,
-    padding: '0 14px',
-    gap: 5,
-    background: C.card,
-    borderBottom: `1px solid ${C.border}`,
-    flexShrink: 0,
-    overflowX: 'auto',
-  },
-  pill: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 5,
-    padding: '2px 9px',
-    borderRadius: 20,
-    border: `1px solid ${C.border}`,
-    background: 'transparent',
-    color: C.t3,
-    fontFamily: 'var(--font-mono)',
-    fontSize: 10,
-    letterSpacing: '0.03em',
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
-    flexShrink: 0,
-  },
-  pillActive: {
-    background: C.card2,
-    border: `1px solid ${C.borderHover}`,
-    color: C.t1,
-  },
-  pillDot: {
-    width: 5,
-    height: 5,
-    borderRadius: '50%',
-    background: 'currentColor',
-    flexShrink: 0,
-  },
-  dot_all:   { background: C.t3 },
-  dot_text:  { background: 'var(--info)' },
-  dot_image: { background: 'var(--success)' },
-  dot_code:  { background: 'var(--warning)' },
-  dot_url:   { background: 'var(--accent)' },
+
 };
 
 export default App;
