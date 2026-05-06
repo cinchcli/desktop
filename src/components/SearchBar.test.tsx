@@ -115,4 +115,55 @@ describe('SearchBar', () => {
       expect(onFilterChange).toHaveBeenCalledWith('all');
     });
   });
+
+  describe('filter chip', () => {
+    it('shows chip when activeFilter is not "all"', () => {
+      renderBar({ activeFilter: 'image' });
+      expect(screen.getByTestId('filter-chip')).toBeInTheDocument();
+      expect(screen.getByTestId('filter-chip')).toHaveTextContent('image');
+    });
+
+    it('does not show chip when activeFilter is "all"', () => {
+      renderBar({ activeFilter: 'all' });
+      expect(screen.queryByTestId('filter-chip')).not.toBeInTheDocument();
+    });
+
+    it('clicking ✕ calls onFilterChange with "all"', () => {
+      const { onFilterChange } = renderBar({ activeFilter: 'code' });
+      fireEvent.click(screen.getByTestId('filter-chip-x'));
+      expect(onFilterChange).toHaveBeenCalledWith('all');
+    });
+
+    it('clicking chip body (not ✕) reopens dropdown', () => {
+      renderBar({ activeFilter: 'image' });
+      fireEvent.click(screen.getByTestId('filter-chip'));
+      expect(screen.getByTestId('filter-dropdown')).toBeInTheDocument();
+    });
+
+    it('dropdown pre-highlights current filter when reopened from chip click', () => {
+      renderBar({ activeFilter: 'code' });
+      fireEvent.click(screen.getByTestId('filter-chip'));
+      // 'code' option should have the highlighted style applied
+      const codeOption = screen.getByTestId('filter-option-code');
+      // highlighted means it does not have the dim style
+      expect(codeOption).not.toHaveStyle({ opacity: '0.28' });
+    });
+
+    it('Backspace on empty input with active filter calls onFilterChange("all")', () => {
+      const { onFilterChange } = renderBar({ value: '', activeFilter: 'url' });
+      const input = screen.getByLabelText('Search clips');
+      fireEvent.keyDown(input, { key: 'Backspace' });
+      expect(onFilterChange).toHaveBeenCalledWith('all');
+    });
+
+    it('placeholder shows "# to filter" hint when no filter is active', () => {
+      renderBar({ activeFilter: 'all' });
+      expect(screen.getByPlaceholderText(/# to filter/i)).toBeInTheDocument();
+    });
+
+    it('placeholder is empty when a filter chip is active', () => {
+      renderBar({ activeFilter: 'text' });
+      expect(screen.getByLabelText('Search clips')).toHaveAttribute('placeholder', '');
+    });
+  });
 });
