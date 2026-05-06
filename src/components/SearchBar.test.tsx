@@ -66,5 +66,53 @@ describe('SearchBar', () => {
       expect(screen.queryByTestId('filter-dropdown')).not.toBeInTheDocument();
       expect(onFilterChange).not.toHaveBeenCalled();
     });
+
+    it('dims non-matching items when a letter is typed after #', () => {
+      renderBar();
+      const input = screen.getByPlaceholderText(/search clips/i);
+      fireEvent.change(input, { target: { value: '#' } });
+      fireEvent.keyDown(input, { key: 'c' });
+      // 'code' matches 'c', others do not
+      const codeOption = screen.getByTestId('filter-option-code');
+      const textOption = screen.getByTestId('filter-option-text');
+      expect(codeOption).not.toHaveStyle({ opacity: '0.28' });
+      expect(textOption).toHaveStyle({ opacity: '0.28' });
+    });
+
+    it('Enter selects the highlighted filter and closes dropdown', () => {
+      const { onFilterChange } = renderBar();
+      const input = screen.getByPlaceholderText(/search clips/i);
+      fireEvent.change(input, { target: { value: '#' } });
+      fireEvent.keyDown(input, { key: 'c' });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      expect(onFilterChange).toHaveBeenCalledWith('code');
+      expect(screen.queryByTestId('filter-dropdown')).not.toBeInTheDocument();
+    });
+
+    it('ArrowDown moves highlight to the next matching item', () => {
+      renderBar();
+      const input = screen.getByPlaceholderText(/search clips/i);
+      fireEvent.change(input, { target: { value: '#' } });
+      // initial highlight is 'all' (CLIP_FILTERS[0]); ArrowDown → 'text'
+      fireEvent.keyDown(input, { key: 'ArrowDown' });
+      expect(screen.getByTestId('filter-option-text')).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByTestId('filter-option-all')).toHaveAttribute('aria-selected', 'false');
+    });
+
+    it('clicking a dropdown item selects it', () => {
+      const { onFilterChange } = renderBar();
+      const input = screen.getByPlaceholderText(/search clips/i);
+      fireEvent.change(input, { target: { value: '#' } });
+      fireEvent.mouseDown(screen.getByTestId('filter-option-image'));
+      expect(onFilterChange).toHaveBeenCalledWith('image');
+    });
+
+    it('selecting "all" calls onFilterChange with "all"', () => {
+      const { onFilterChange } = renderBar({ activeFilter: 'image' });
+      const input = screen.getByLabelText('Search clips');
+      fireEvent.change(input, { target: { value: '#' } });
+      fireEvent.mouseDown(screen.getByTestId('filter-option-all'));
+      expect(onFilterChange).toHaveBeenCalledWith('all');
+    });
   });
 });
