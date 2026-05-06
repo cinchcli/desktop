@@ -98,7 +98,7 @@ jobs:
           rm certificate.p12
 
       - name: Build Tauri app
-        timeout-minutes: 40
+        timeout-minutes: 90
         uses: tauri-apps/tauri-action@51a9f1156b33df106d827c3a78f8f894946c5faa # action-v0.5.25 (node20, avoids node24 top-level-await crash in v0.6.x)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
