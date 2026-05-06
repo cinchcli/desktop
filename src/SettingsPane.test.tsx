@@ -42,6 +42,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 describe("SettingsPane", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     // Default mocks: retention config loads, global shortcut loads
     invoke.mockImplementation((cmd: string) => {
       if (cmd === "get_retention_config") {
@@ -147,6 +148,17 @@ describe("SettingsPane", () => {
         altKey: false,
       });
       expect(await screen.findByText("Invalid shortcut")).toBeInTheDocument();
+    });
+  });
+
+  describe("Clip filters", () => {
+    it("does not expose editable filter rules", async () => {
+      render(<SettingsPane onClose={() => {}} clipCount={0} />);
+
+      await screen.findByLabelText("Global shortcut");
+
+      expect(screen.queryByText("Clip filters")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Save filter rules" })).not.toBeInTheDocument();
     });
   });
 });

@@ -68,12 +68,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .menu(&menu)
         .tooltip("Cinch — Clipboard Sync")
         .on_menu_event(|app: &AppHandle, event| match event.id().as_ref() {
-            "open" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
-            }
+            "open" => crate::show_on_active_monitor(app),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -84,11 +79,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 ..
             } = event
             {
-                let app = tray.app_handle();
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                crate::show_on_active_monitor(tray.app_handle());
             }
         })
         .build(app)?;
