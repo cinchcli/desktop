@@ -59,6 +59,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::auth::retry_auth,
             commands::auth::handle_deeplink,
             commands::auth::pair_via_ssh,
+            commands::auth::list_ssh_hosts,
             commands::relays::pair_with_token,
         ])
         .events(collect_events![
@@ -592,7 +593,9 @@ pub(crate) fn show_on_active_monitor(app: &tauri::AppHandle) {
         if let Some(monitor) = target {
             let pos = monitor.position();
             let size = monitor.size();
-            let win_size = window.outer_size().unwrap_or(tauri::PhysicalSize::new(960, 600));
+            let win_size = window
+                .outer_size()
+                .unwrap_or(tauri::PhysicalSize::new(960, 600));
             let x = pos.x + ((size.width as i32 - win_size.width as i32) / 2);
             let y = pos.y + ((size.height as i32 - win_size.height as i32) / 2);
             window.set_position(tauri::PhysicalPosition::new(x, y))?;

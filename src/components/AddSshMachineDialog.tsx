@@ -24,12 +24,27 @@ export function AddSshMachineDialog({
   const [skipInstall, setSkipInstall] = useState(false);
   const [browserUrl, setBrowserUrl] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [sshHosts, setSshHosts] = useState<string[]>([]);
   const targetRef = useRef<HTMLInputElement>(null);
   const unsubRef = useRef<(() => void) | null>(null);
 
   // Focus target input on mount
   useEffect(() => {
     targetRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    unwrap(commands.listSshHosts())
+      .then((hosts) => {
+        if (!cancelled) setSshHosts(hosts);
+      })
+      .catch(() => {
+        if (!cancelled) setSshHosts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Cleanup event listener on unmount
@@ -49,10 +64,6 @@ export function AddSshMachineDialog({
     const unsub = await events.sshPairMarkerFound.listen((e) => {
       setBrowserUrl(e.payload.url);
       setStep('browser');
-      // Open the browser automatically
-      if (typeof window.__TAURI__ !== 'undefined') {
-        window.__TAURI__.shell?.open(e.payload.url).catch(() => {});
-      }
     });
     unsubRef.current = unsub;
 
@@ -98,13 +109,33 @@ export function AddSshMachineDialog({
               <input
                 ref={targetRef}
                 style={S.input}
+                list="ssh-host-suggestions"
                 placeholder="user@hostname or SSH alias"
                 value={target}
                 onChange={(e) => setTarget(e.target.value)}
               />
+              <datalist id="ssh-host-suggestions">
+                {sshHosts.map((host) => (
+                  <option key={host} value={host} />
+                ))}
+              </datalist>
               <span style={S.hint}>
                 Anything <code style={S.code}>ssh &lt;target&gt;</code> accepts
               </span>
+              {sshHosts.length > 0 && (
+                <div style={S.hostList} aria-label="SSH aliases">
+                  {sshHosts.map((host) => (
+                    <button
+                      key={host}
+                      type="button"
+                      style={S.hostButton}
+                      onClick={() => setTarget(host)}
+                    >
+                      {host}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div style={S.field}>
@@ -173,11 +204,7 @@ export function AddSshMachineDialog({
                   style={S.urlLink}
                   onClick={(e) => {
                     e.preventDefault();
-                    if (typeof window.__TAURI__ !== 'undefined') {
-                      window.__TAURI__.shell?.open(browserUrl);
-                    } else {
-                      window.open(browserUrl, '_blank');
-                    }
+                    window.open(browserUrl, '_blank');
                   }}
                 >
                   Open browser manually
@@ -352,6 +379,24 @@ const S: Record<string, React.CSSProperties> = {
     fontSize: 12,
     color: C.t2,
     fontFamily: 'var(--font-body)',
+  },
+
+  hostList: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 4,
+  },
+
+  hostButton: {
+    background: C.bg,
+    color: C.t2,
+    border: `1px solid ${C.border}`,
+    borderRadius: 6,
+    padding: '4px 8px',
+    fontSize: 11,
+    fontFamily: 'var(--font-mono)',
+    cursor: 'pointer',
   },
 
   actions: {

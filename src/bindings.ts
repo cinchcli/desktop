@@ -98,6 +98,8 @@ export const commands = {
 	 *  registers its public key with the relay).
 	 */
 	pairViaSsh: (target: string, relayUrl: string | null, skipInstall: boolean) => typedError<null, string>(__TAURI_INVOKE("pair_via_ssh", { target, relayUrl, skipInstall })),
+	// list_ssh_hosts — return concrete aliases from the user's ~/.ssh/config.
+	listSshHosts: () => typedError<string[], string>(__TAURI_INVOKE("list_ssh_hosts")),
 	/**
 	 *  Pair with a relay using a master token obtained from `cinch auth login`.
 	 *  Clears any existing relay and replaces it with the new one.
