@@ -63,6 +63,9 @@ jobs:
           fi
           echo "macOS target assertion passed: $TARGET on $RUNNER_OS"
 
+      - name: Install protobuf compiler
+        run: brew install protobuf
+
       - name: Checkout cinch sibling (path-dep)
         run: git clone https://x-access-token:${{ secrets.CINCH_READ_PAT }}@github.com/cinchcli/cinch.git ../cinch
 
