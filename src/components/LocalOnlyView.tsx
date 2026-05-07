@@ -6,6 +6,7 @@ import { applyClipFilter, CLIP_FILTERS, type ClipFilter } from "../lib/clipFilte
 import { C } from "../design";
 import { IconSearch, IconX, IconSun, IconMoon, IconGear, IconCopy, IconTrash } from "../icons";
 import { ClipCard } from "./ClipCard";
+import { ClipDetail } from "./ClipDetail";
 import { EmptyState } from "./EmptyState";
 import { UpgradePrompt } from "./UpgradePrompt";
 
@@ -164,6 +165,15 @@ export function LocalOnlyView({ theme, toggleTheme, onOpenSettings }: LocalOnlyV
     showToast("Deleted", "trash");
   }, [selectedClip, refreshClips, showToast]);
 
+  const handlePin = useCallback(async (clip: LocalClip) => {
+    if (clip.is_pinned) {
+      await unwrap(commands.unpinClip(clip.id));
+    } else {
+      await unwrap(commands.pinClip(clip.id, null));
+    }
+    refreshClips();
+  }, [refreshClips]);
+
   // ─── Keyboard handlers ────────────────────────────────
 
   useEffect(() => {
@@ -296,33 +306,45 @@ export function LocalOnlyView({ theme, toggleTheme, onOpenSettings }: LocalOnlyV
         ))}
       </div>
 
-      {/* Middle: scrollable clip list area */}
-      <div ref={clipListRef} style={S.clipList}>
-        {loading ? (
-          <LoadingSkeleton />
-        ) : clips.length === 0 ? (
-          <EmptyState
-            variant={debouncedQuery ? "search-miss" : "no-clips"}
-            query={debouncedQuery || undefined}
+      {/* Middle: clip list + detail pane */}
+      <div style={S.body}>
+        <div ref={clipListRef} style={S.clipList}>
+          {loading ? (
+            <LoadingSkeleton />
+          ) : clips.length === 0 ? (
+            <EmptyState
+              variant={debouncedQuery ? "search-miss" : "no-clips"}
+              query={debouncedQuery || undefined}
+            />
+          ) : (
+            <div style={{ padding: "4px 0", display: "flex", flexDirection: "column", gap: 4 }}>
+              {clips.map((clip) => (
+                <ClipCard
+                  key={clip.id}
+                  clip={clip}
+                  selected={selectedClip?.id === clip.id}
+                  onCopy={() => copyClip(clip)}
+                  onDelete={() => handleDelete(clip.id)}
+                  onClick={() => setSelectedClip(clip)}
+                  onDoubleClick={() => {
+                    setSelectedClip(clip);
+                    copyClip(clip);
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={S.detailPane}>
+          <ClipDetail
+            clip={selectedClip}
+            onCopy={copyClip}
+            onPin={handlePin}
+            onDelete={(c) => handleDelete(c.id)}
+            searchQuery={debouncedQuery}
           />
-        ) : (
-          <div style={{ padding: "4px 0", display: "flex", flexDirection: "column", gap: 4 }}>
-            {clips.map((clip) => (
-              <ClipCard
-                key={clip.id}
-                clip={clip}
-                selected={selectedClip?.id === clip.id}
-                onCopy={() => copyClip(clip)}
-                onDelete={() => handleDelete(clip.id)}
-                onClick={() => setSelectedClip(clip)}
-                onDoubleClick={() => {
-                  setSelectedClip(clip);
-                  copyClip(clip);
-                }}
-              />
-            ))}
-          </div>
-        )}
+        </div>
       </div>
 
       {/* Bottom: upgrade prompt footer */}
@@ -394,10 +416,25 @@ const S: Record<string, CSSProperties> = {
     borderRadius: 4,
     flexShrink: 0,
   },
-  clipList: {
+  body: {
+    display: "flex",
     flex: 1,
+    minHeight: 0,
+    overflow: "hidden",
+  },
+  clipList: {
+    width: 320,
+    flexShrink: 0,
     overflowY: "auto",
     background: C.bg,
+  },
+  detailPane: {
+    flex: 1,
+    minWidth: 0,
+    display: "flex",
+    flexDirection: "column",
+    borderLeft: `1px solid ${C.border}`,
+    overflow: "hidden",
   },
   filterRow: {
     display: "flex",
