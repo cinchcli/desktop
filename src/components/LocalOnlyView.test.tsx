@@ -258,7 +258,7 @@ describe('LocalOnlyView', () => {
 
     render(<LocalOnlyView {...defaultProps} />);
     await waitFor(() => {
-      expect(screen.getByText(/First/)).toBeInTheDocument();
+      expect(screen.getAllByText(/First/)[0]).toBeInTheDocument();
     });
 
     // ArrowDown should select first clip
@@ -267,7 +267,10 @@ describe('LocalOnlyView', () => {
     });
 
     // The first clip should now have aria-selected=true
-    const firstCard = screen.getByText(/First/).closest('[role="button"]');
+    const firstCard = screen
+      .getAllByText(/First/)
+      .map((el) => el.closest('[role="button"]'))
+      .find((el) => el !== null);
     expect(firstCard).toHaveAttribute('aria-selected', 'true');
   });
 
