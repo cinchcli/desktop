@@ -21,8 +21,18 @@ pub async fn run_joiner_flow(relay_url: &str, token: &str, user_id: &str, device
             return;
         }
     };
+    run_joiner_flow_with_privkey(relay_url, token, &priv_b64, user_id).await;
+}
 
-    let pub_b64 = match client_core::crypto::pub_from_priv(&priv_b64) {
+/// Inner function that receives the already-read private key. Separated so
+/// tests can inject a known keypair without touching the real credstore.
+pub(crate) async fn run_joiner_flow_with_privkey(
+    relay_url: &str,
+    token: &str,
+    priv_b64: &str,
+    user_id: &str,
+) {
+    let pub_b64 = match client_core::crypto::pub_from_priv(priv_b64) {
         Ok(p) => p,
         Err(e) => {
             log::error!("auth_bootstrap: derive pubkey failed: {}", e);
@@ -59,7 +69,7 @@ pub async fn run_joiner_flow(relay_url: &str, token: &str, user_id: &str, device
         log::warn!("auth_bootstrap: register_device_public_key failed: {}", e);
     }
 
-    let got_key = client_core::auth::poll_key_bundle(&client, &priv_b64, user_id).await;
+    let got_key = client_core::auth::poll_key_bundle(&client, priv_b64, user_id).await;
     if got_key {
         log::info!("auth_bootstrap: canonical key received from bearer");
     } else {

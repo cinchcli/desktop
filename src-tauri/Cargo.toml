@@ -52,6 +52,9 @@ specta-typescript = "0.0.11"
 specta = { version = "2.0.0-rc.24", features = ["derive"] }
 tauri-specta = { version = "2.0.0-rc.24", features = ["derive", "typescript"] }
 
+[dev-dependencies]
+wiremock = "0.6"
+
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
 

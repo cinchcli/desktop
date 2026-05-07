@@ -259,8 +259,15 @@ async fn connect_and_listen(
         match msg {
             Message::Text(text) => {
                 handle_text_message(
-                    app, &write, &text, db, clipboard, auth_handle,
-                    relay_url, token, retry_gate,
+                    app,
+                    &write,
+                    &text,
+                    db,
+                    clipboard,
+                    auth_handle,
+                    relay_url,
+                    token,
+                    retry_gate,
                 )
                 .await;
             }
@@ -283,7 +290,7 @@ async fn connect_and_listen(
 /// Fire `POST /auth/key-bundle/retry` at most once per 60-second window.
 /// A burst of decrypt failures (e.g., many clips arriving while keys diverge)
 /// must not spam the relay.
-async fn fire_retry_debounced(
+pub(crate) async fn fire_retry_debounced(
     _app: &AppHandle,
     relay_url: &str,
     token: &str,
@@ -342,7 +349,10 @@ async fn handle_text_message(
                     match decrypt_clip_content(&mut clip, key) {
                         DecryptOutcome::Plaintext | DecryptOutcome::Decoded => {}
                         DecryptOutcome::MissingKey => {
-                            error!("clip {}: no AES key — firing retry_key_bundle", clip.clip_id);
+                            error!(
+                                "clip {}: no AES key — firing retry_key_bundle",
+                                clip.clip_id
+                            );
                             crate::events::ClipDecryptFailed {
                                 clip_id: clip.clip_id.clone(),
                                 reason: "missing_key".into(),
@@ -353,7 +363,10 @@ async fn handle_text_message(
                             return;
                         }
                         DecryptOutcome::TagFailed { error: ref e } => {
-                            error!("clip {}: AES-GCM tag failed ({}) — firing retry_key_bundle", clip.clip_id, e);
+                            error!(
+                                "clip {}: AES-GCM tag failed ({}) — firing retry_key_bundle",
+                                clip.clip_id, e
+                            );
                             crate::events::ClipDecryptFailed {
                                 clip_id: clip.clip_id.clone(),
                                 reason: format!("tag_failed: {e}"),
