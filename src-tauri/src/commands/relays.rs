@@ -215,6 +215,20 @@ pub async fn pair_with_token(
 
     transition(&app, &auth_handle, next_state);
 
+    // Joiner bootstrap runs concurrently so the WS connection is not delayed.
+    {
+        let bs_relay = ws_relay_url.clone();
+        let bs_token = ws_token.clone();
+        let bs_user = pair_resp.user_id.clone();
+        let bs_device = pair_resp.device_id.clone();
+        tokio::spawn(async move {
+            crate::auth_bootstrap::run_joiner_flow(
+                &bs_relay, &bs_token, &bs_user, &bs_device,
+            )
+            .await;
+        });
+    }
+
     let handle = crate::ws::spawn_ws_client(
         &app,
         ws_relay_url,

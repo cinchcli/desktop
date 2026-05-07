@@ -269,6 +269,20 @@ pub fn sign_in(
                 },
             );
 
+            // Joiner bootstrap runs concurrently so the WS connection is not delayed.
+            // If a bearer responds within 30s, the canonical AES key overwrites the
+            // locally-generated placeholder; subsequent decrypt attempts use the right key.
+            let bs_relay = relay2.clone();
+            let bs_token = token.clone();
+            let bs_user = user_id.clone();
+            let bs_device = device_id.clone();
+            tokio::spawn(async move {
+                crate::auth_bootstrap::run_joiner_flow(
+                    &bs_relay, &bs_token, &bs_user, &bs_device,
+                )
+                .await;
+            });
+
             let jh = crate::ws::spawn_ws_client(
                 &app2,
                 relay2.clone(),
@@ -446,6 +460,20 @@ pub async fn handle_deeplink(
                 .timeout(std::time::Duration::from_secs(5))
                 .send()
                 .await;
+        });
+    }
+
+    // Joiner bootstrap runs concurrently so the WS connection is not delayed.
+    {
+        let bs_relay = relay_url.clone();
+        let bs_token = token.clone();
+        let bs_user = user_id.clone();
+        let bs_device = device_id.clone();
+        tokio::spawn(async move {
+            crate::auth_bootstrap::run_joiner_flow(
+                &bs_relay, &bs_token, &bs_user, &bs_device,
+            )
+            .await;
         });
     }
 
