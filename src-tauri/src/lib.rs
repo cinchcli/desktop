@@ -1,4 +1,5 @@
 pub mod auth;
+mod auth_bootstrap;
 mod clipboard;
 mod commands;
 pub mod crypto;
@@ -85,10 +86,16 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
 pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    // Desktop always uses ~/.cinch/config.json (0600) for credential storage instead of the
-    // OS Keychain. ws.rs reads the AES key via auth::read_encryption_key which is config.json-only,
-    // so using Keychain at write time causes a read-miss and decryption failure. Opting out here
-    // makes both read and write paths consistent without any Keychain prompt.
+    // CINCH_KEYRING=none: desktop deliberately uses ~/.cinch/config.json (0600) as its
+    // single credential store rather than the OS Keychain. Trade-offs:
+    //   + Single-store determinism: auth_bootstrap::run_joiner_flow writes the canonical
+    //     AES key and ws.rs reads it via credstore::read_encryption_key — both see the
+    //     same plaintext store so there is no keychain-vs-config read-miss.
+    //   + No Tauri-side Keychain permission prompt on first sign-in.
+    //   - Cannot share AES key in-process with a CLI device on the same Mac that uses
+    //     keychain; same-machine sharing relies on the relay key-bundle path (relay treats
+    //     desktop and CLI as separate devices, which is correct).
+    // Revisit if same-machine CLI+desktop key sharing becomes a UX requirement.
     if std::env::var("CINCH_KEYRING").is_err() {
         std::env::set_var("CINCH_KEYRING", "none");
     }
