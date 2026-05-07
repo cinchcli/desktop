@@ -88,8 +88,7 @@ impl Backend for MacBackend {
 
             // NSUTF8StringEncoding = 4
             let alloc: *mut Object = msg_send![nsstring_cls, alloc];
-            let ns_string: *mut Object =
-                msg_send![alloc, initWithData:ns_data encoding:4usize];
+            let ns_string: *mut Object = msg_send![alloc, initWithData:ns_data encoding:4usize];
             if ns_string.is_null() {
                 return Err(ClipboardError::Backend(
                     "NSString initWithData:encoding: returned nil for UTF-8 content".into(),
