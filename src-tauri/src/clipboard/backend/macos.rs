@@ -1,12 +1,10 @@
-//! macOS clipboard backend — wraps NSPasteboard, pbcopy, and NSWorkspace.
+//! macOS clipboard backend — wraps NSPasteboard and NSWorkspace.
 //!
 //! All Objective-C pointers are fetched fresh per call; none are cached as
 //! fields. This matches the pre-refactor behavior (autorelease pool safety).
 
 use objc::runtime::{Class, Object};
 use objc::{msg_send, sel, sel_impl};
-use std::io::Write;
-use std::process::{Command, Stdio};
 
 use super::{Backend, ClipboardError, PollContent, PollSnapshot};
 
@@ -68,19 +66,40 @@ impl Backend for MacBackend {
     }
 
     fn write_text(&mut self, content: &str) -> Result<(), ClipboardError> {
-        let mut child = Command::new("pbcopy")
-            .stdin(Stdio::piped())
-            .spawn()
-            .map_err(|e| ClipboardError::Backend(format!("pbcopy spawn: {}", e)))?;
+        // Use NSPasteboard directly instead of pbcopy. pbcopy spawns a subprocess
+        // that may inherit no LANG env var (GUI apps launched from Finder don't get
+        // the shell environment), causing it to fall back to defaultCStringEncoding
+        // (Mac Roman) and misinterpret multi-byte UTF-8 sequences as individual
+        // Mac Roman characters. NSPasteboard API is encoding-aware.
+        unsafe {
+            let cls = Class::get("NSPasteboard")
+                .ok_or_else(|| ClipboardError::Backend("NSPasteboard class missing".into()))?;
+            let pb: *mut Object = msg_send![cls, generalPasteboard];
+            let _: () = msg_send![pb, clearContents];
 
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(content.as_bytes())
-                .map_err(|e| ClipboardError::Backend(format!("pbcopy write: {}", e)))?;
+            let nsstring_cls = Class::get("NSString")
+                .ok_or_else(|| ClipboardError::Backend("NSString class missing".into()))?;
+            let nsdata_cls = Class::get("NSData")
+                .ok_or_else(|| ClipboardError::Backend("NSData class missing".into()))?;
+
+            let bytes = content.as_bytes();
+            let ns_data: *mut Object =
+                msg_send![nsdata_cls, dataWithBytes:bytes.as_ptr() length:bytes.len()];
+
+            // NSUTF8StringEncoding = 4
+            let alloc: *mut Object = msg_send![nsstring_cls, alloc];
+            let ns_string: *mut Object =
+                msg_send![alloc, initWithData:ns_data encoding:4usize];
+            if ns_string.is_null() {
+                return Err(ClipboardError::Backend(
+                    "NSString initWithData:encoding: returned nil for UTF-8 content".into(),
+                ));
+            }
+
+            let pboard_type: *mut Object =
+                msg_send![nsstring_cls, stringWithUTF8String: c"public.utf8-plain-text".as_ptr()];
+            let _: bool = msg_send![pb, setString:ns_string forType:pboard_type];
         }
-        child
-            .wait()
-            .map_err(|e| ClipboardError::Backend(format!("pbcopy wait: {}", e)))?;
         Ok(())
     }
 
