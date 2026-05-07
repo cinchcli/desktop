@@ -161,13 +161,10 @@ async fn connect_and_listen(
     let ws_base = relay_url
         .replace("https://", "wss://")
         .replace("http://", "ws://");
-    let ws_url_owned = match fetch_ws_ticket(relay_url, token).await {
-        Ok(ticket) => format!("{}/ws?ticket={}", ws_base.trim_end_matches('/'), ticket),
-        Err(e) => {
-            warn!("ws ticket fetch failed, using token fallback: {}", e);
-            format!("{}/ws?token={}", ws_base.trim_end_matches('/'), token)
-        }
-    };
+    let ticket = fetch_ws_ticket(relay_url, token)
+        .await
+        .map_err(|e| format!("ws ticket fetch failed: {}", e))?;
+    let ws_url_owned = format!("{}/ws?ticket={}", ws_base.trim_end_matches('/'), ticket);
     let ws_url = ws_url_owned.as_str();
     let connect_result = connect_async(ws_url).await;
 
