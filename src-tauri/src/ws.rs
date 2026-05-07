@@ -392,7 +392,11 @@ async fn handle_text_message(
                     let mut state = state.lock().unwrap();
                     tray::update_tray_clip(app, &clip);
 
-                    let alert_enabled = db.is_source_alert_enabled(&clip.source).unwrap_or(true);
+                    // The relay broadcasts every clip back to all devices including
+                    // the sender. "local" clips originate on this device, so
+                    // notifying the user about their own clipboard action is noise.
+                    let alert_enabled = clip.source != "local"
+                        && db.is_source_alert_enabled(&clip.source).unwrap_or(true);
                     if alert_enabled {
                         if is_new_source {
                             // Always notify for a new source
