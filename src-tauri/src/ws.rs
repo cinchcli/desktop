@@ -106,6 +106,9 @@ pub fn spawn_ws_client(
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
         let mut backoff = crate::auth::Backoff::new();
+        // Persists across reconnects so a burst of decrypt failures only fires
+        // one retry_key_bundle per 60-second window regardless of reconnect count.
+        let retry_gate: Arc<Mutex<Option<std::time::Instant>>> = Arc::new(Mutex::new(None));
         loop {
             info!("connecting to relay: {}", relay_url);
             ws_status.set("connecting");
@@ -123,6 +126,7 @@ pub fn spawn_ws_client(
                 &ws_status,
                 &auth_handle,
                 &relay_connected,
+                &retry_gate,
             )
             .await
             {
@@ -157,6 +161,7 @@ async fn connect_and_listen(
     ws_status: &Arc<WsStatus>,
     auth_handle: &AuthStateHandle,
     relay_connected: &Arc<AtomicBool>,
+    retry_gate: &Arc<Mutex<Option<std::time::Instant>>>,
 ) -> Result<(), String> {
     let ws_base = relay_url
         .replace("https://", "wss://")
@@ -253,7 +258,11 @@ async fn connect_and_listen(
 
         match msg {
             Message::Text(text) => {
-                handle_text_message(app, &write, &text, db, clipboard, auth_handle).await;
+                handle_text_message(
+                    app, &write, &text, db, clipboard, auth_handle,
+                    relay_url, token, retry_gate,
+                )
+                .await;
             }
             Message::Ping(data) => {
                 let mut w = write.lock().await;
@@ -271,6 +280,37 @@ async fn connect_and_listen(
     Ok(())
 }
 
+/// Fire `POST /auth/key-bundle/retry` at most once per 60-second window.
+/// A burst of decrypt failures (e.g., many clips arriving while keys diverge)
+/// must not spam the relay.
+async fn fire_retry_debounced(
+    _app: &AppHandle,
+    relay_url: &str,
+    token: &str,
+    gate: &Arc<Mutex<Option<std::time::Instant>>>,
+) {
+    let now = std::time::Instant::now();
+    {
+        let mut last = gate.lock().await;
+        if let Some(t) = *last {
+            if now.duration_since(t) < std::time::Duration::from_secs(60) {
+                return;
+            }
+        }
+        *last = Some(now);
+    }
+    match client_core::http::RestClient::new(relay_url.to_string(), token.to_string()) {
+        Ok(client) => {
+            if let Err(e) = client.retry_key_bundle().await {
+                warn!("retry_key_bundle failed: {}", e);
+            } else {
+                info!("retry_key_bundle: re-share request sent to relay");
+            }
+        }
+        Err(e) => warn!("fire_retry_debounced: cannot build http client: {}", e),
+    }
+}
+
 async fn handle_text_message(
     app: &AppHandle,
     write: &Arc<Mutex<WsSink>>,
@@ -278,6 +318,9 @@ async fn handle_text_message(
     db: &Arc<Database>,
     clipboard: &Arc<ClipboardService>,
     auth_handle: &AuthStateHandle,
+    relay_url: &str,
+    token: &str,
+    retry_gate: &Arc<Mutex<Option<std::time::Instant>>>,
 ) {
     let msg: WSMessage = match serde_json::from_str(text) {
         Ok(m) => m,
@@ -290,41 +333,35 @@ async fn handle_text_message(
     match msg.action.as_str() {
         ACTION_NEW_CLIP => {
             if let Some(mut clip) = msg.clip {
-                // Phase 4.5: decrypt encrypted clips BEFORE any processing
+                // Decrypt encrypted clips BEFORE any processing.
+                // On failure: emit ClipDecryptFailed and auto-fire retry_key_bundle (debounced).
+                // Never insert ciphertext as if it were plaintext content.
                 if clip.encrypted {
-                    match client_core::credstore::read_encryption_key(&clip.user_id) {
-                        Some(key) => {
-                            match crate::crypto::decrypt(&key, &clip.content) {
-                                Ok(plaintext) => {
-                                    // Replace ciphertext with plaintext for all downstream processing.
-                                    // For binary clips (images), encode as base64 to avoid lossy UTF-8
-                                    // corruption of raw binary bytes.
-                                    let is_binary = clip.media_path.is_some()
-                                        || clip.content_type.as_str().starts_with("image");
-                                    if is_binary {
-                                        use base64::Engine;
-                                        clip.content = base64::engine::general_purpose::STANDARD
-                                            .encode(&plaintext);
-                                    } else {
-                                        clip.content =
-                                            String::from_utf8(plaintext).unwrap_or_else(|e| {
-                                                String::from_utf8_lossy(e.as_bytes()).to_string()
-                                            });
-                                    }
-                                    // Mark as decrypted — local DB always stores plaintext
-                                    clip.encrypted = false;
-                                }
-                                Err(e) => {
-                                    error!("clip decryption failed: {}", e);
-                                    // Insert as-is (encrypted) — clip not lost, but content unreadable
-                                }
+                    let key = client_core::credstore::read_encryption_key(&clip.user_id);
+                    use client_core::ws::{decrypt_clip_content, DecryptOutcome};
+                    match decrypt_clip_content(&mut clip, key) {
+                        DecryptOutcome::Plaintext | DecryptOutcome::Decoded => {}
+                        DecryptOutcome::MissingKey => {
+                            error!("clip {}: no AES key — firing retry_key_bundle", clip.clip_id);
+                            crate::events::ClipDecryptFailed {
+                                clip_id: clip.clip_id.clone(),
+                                reason: "missing_key".into(),
                             }
+                            .emit(app)
+                            .ok();
+                            fire_retry_debounced(app, relay_url, token, retry_gate).await;
+                            return;
                         }
-                        None => {
-                            warn!(
-                                "no encryption key available for decryption: no credential stored"
-                            );
-                            // Insert as-is — encrypted content visible in UI as base64 garble
+                        DecryptOutcome::TagFailed { error: ref e } => {
+                            error!("clip {}: AES-GCM tag failed ({}) — firing retry_key_bundle", clip.clip_id, e);
+                            crate::events::ClipDecryptFailed {
+                                clip_id: clip.clip_id.clone(),
+                                reason: format!("tag_failed: {e}"),
+                            }
+                            .emit(app)
+                            .ok();
+                            fire_retry_debounced(app, relay_url, token, retry_gate).await;
+                            return;
                         }
                     }
                 }
