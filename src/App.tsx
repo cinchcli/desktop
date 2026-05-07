@@ -199,6 +199,15 @@ function App() {
     return () => { unsubs.forEach((p) => p.then((f) => f())); };
   }, [refreshClips, refreshSources]);
 
+  useEffect(() => {
+    const unsubBlur = getCurrentWindow().listen('tauri://blur', () => {
+      setSelectedClip(null);
+      setSearchQuery('');
+      setDebouncedQuery('');
+    });
+    return () => { unsubBlur.then((f) => f()); };
+  }, []);
+
   const copyClip = useCallback((clip: LocalClip) => {
     if (clip.content_type === 'image' && clip.media_path) {
       unwrap(commands.copyImageToClipboard(clip.media_path));
@@ -209,6 +218,7 @@ function App() {
     }
     setSearchQuery('');
     setDebouncedQuery('');
+    setSelectedClip(null);
     void unwrap(commands.markClipCopied(clip.id))
       .then(refreshClips)
       .catch((e) => console.error('failed to mark clip copied:', e));
