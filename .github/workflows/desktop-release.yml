@@ -106,11 +106,14 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          xcrun notarytool history \
+          if ! xcrun notarytool history \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
-            --output-format json 2>&1 | head -5
+            --output-format json; then
+            echo "::error::Notarization credentials invalid — check APPLE_ID, APPLE_PASSWORD (must be app-specific), APPLE_TEAM_ID"
+            exit 1
+          fi
           echo "Notarization credentials verified"
 
       - name: Build Tauri app
