@@ -58,3 +58,13 @@ pub struct SshPairMarkerFound {
 pub struct OfflineQueueDropped {
     pub count: u32,
 }
+
+/// Fired when a received clip cannot be decrypted (wrong or missing AES key).
+/// The desktop fires retry_key_bundle automatically; this event lets the UI
+/// show a hint so the user knows recovery is in progress.
+#[derive(Clone, Serialize, Deserialize, Type, Event)]
+pub struct ClipDecryptFailed {
+    pub clip_id: String,
+    /// "missing_key" or "tag_failed: <detail>"
+    pub reason: String,
+}
