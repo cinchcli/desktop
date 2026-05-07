@@ -13,6 +13,7 @@ import SettingsPane from './SettingsPane';
 import { LocalOnlyView } from './components/LocalOnlyView';
 import { AdoptedAuthToast } from './components/AdoptedAuthToast';
 import { OfflineQueueDroppedToast } from './components/OfflineQueueDroppedToast';
+import { ClipDecryptFailedToast } from './components/ClipDecryptFailedToast';
 import { AddRelayDialog } from './components/AddRelayDialog';
 import { Rail, type RailPanel } from './components/Rail';
 import { SearchBar } from './components/SearchBar';
@@ -441,6 +442,7 @@ function App() {
         {handoffDialog}
         <AdoptedAuthToast />
         <OfflineQueueDroppedToast />
+        <ClipDecryptFailedToast />
       </>
     );
   }
@@ -568,6 +570,7 @@ function App() {
       {toast && <Toast message={toast.message} icon={toast.icon} />}
       <AdoptedAuthToast />
       <OfflineQueueDroppedToast />
+      <ClipDecryptFailedToast />
       {handoffDialog}
     </main>
   );
