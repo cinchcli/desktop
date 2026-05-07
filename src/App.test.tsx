@@ -33,6 +33,7 @@ vi.mock('@tauri-apps/api/window', () => ({
         startDragging: vi.fn(),
         hide: vi.fn(),
         setSize: vi.fn(() => Promise.resolve()),
+        listen: vi.fn(() => Promise.resolve(() => {})),
     })),
 }));
 

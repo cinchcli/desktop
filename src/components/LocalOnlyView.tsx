@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef, type CSSProperties } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { commands, events } from "../bindings";
 import type { LocalClip } from "../bindings";
 import { unwrap } from "../lib/tauri";
@@ -137,6 +138,15 @@ export function LocalOnlyView({ theme, toggleTheme, onOpenSettings }: LocalOnlyV
     };
   }, [refreshClips]);
 
+  useEffect(() => {
+    const unsubBlur = getCurrentWindow().listen('tauri://blur', () => {
+      setSelectedClip(null);
+      setSearchQuery('');
+      setDebouncedQuery('');
+    });
+    return () => { unsubBlur.then((f) => f()); };
+  }, []);
+
   // Scroll selected clip into view
   useEffect(() => {
     if (!selectedClip || !clipListRef.current) return;
@@ -156,6 +166,7 @@ export function LocalOnlyView({ theme, toggleTheme, onOpenSettings }: LocalOnlyV
       unwrap(commands.copyClipToClipboard(clip.content));
       showToast("Copied to clipboard", "copy");
     }
+    setSelectedClip(null);
   }, [showToast]);
 
   const handleDelete = useCallback(async (id: string) => {
