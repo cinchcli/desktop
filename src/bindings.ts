@@ -116,6 +116,7 @@ export const events = {
 	authAdoptedFromCli: makeEvent<AuthAdoptedFromCli>("auth-adopted-from-cli"),
 	authStateChanged: makeEvent<AuthStateChanged>("auth-state-changed"),
 	cliHandoffRequested: makeEvent<CliHandoffRequested>("cli-handoff-requested"),
+	clipDecryptFailed: makeEvent<ClipDecryptFailed>("clip-decrypt-failed"),
 	clipDeleted: makeEvent<ClipDeleted>("clip-deleted"),
 	clipReceived: makeEvent<ClipReceived>("clip-received"),
 	imageDownloadComplete: makeEvent<ImageDownloadComplete>("image-download-complete"),
@@ -163,6 +164,17 @@ export type AuthStateChanged = AuthState;
  */
 export type CliHandoffRequested = {
 	relay_url: string,
+};
+
+/**
+ *  Fired when a received clip cannot be decrypted (wrong or missing AES key).
+ *  The desktop fires retry_key_bundle automatically; this event lets the UI
+ *  show a hint so the user knows recovery is in progress.
+ */
+export type ClipDecryptFailed = {
+	clip_id: string,
+	// "missing_key" or "tag_failed: <detail>"
+	reason: string,
 };
 
 export type ClipDeleted = string;
