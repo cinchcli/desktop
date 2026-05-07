@@ -5,6 +5,7 @@ import { C, formatTime } from '../design';
 import { sourcePillVars } from '../lib/sourceColor';
 import type { Device, SourceAlertSetting, SourceInfo } from '../bindings';
 import ConfirmDialog from '../ConfirmDialog';
+import { CleanupDialog } from './CleanupDialog';
 import { AddSshMachineDialog } from './AddSshMachineDialog';
 
 // ─── Props ────────────────────────────────────────────────
@@ -43,6 +44,7 @@ export function MachinesPanel({
   const [confirmingRevokeId, setConfirmingRevokeId] = useState<string | null>(
     null,
   );
+  const [cleanupHostname, setCleanupHostname] = useState<string | null>(null);
   const [nicknameError, setNicknameError] = useState<string | null>(null);
   const [showSshDialog, setShowSshDialog] = useState(false);
   const nicknameErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -137,9 +139,12 @@ export function MachinesPanel({
 
   const revokeDevice = useCallback(
     async (deviceId: string) => {
+      const hostname =
+        devices.find((d) => d.id === deviceId)?.hostname || deviceId;
       try {
         await unwrap(commands.revokeDevice(deviceId));
         onShowToast('Device revoked');
+        setCleanupHostname(hostname);
         await fetchAll();
         onDeviceChange?.();
       } catch (_e) {
@@ -147,7 +152,7 @@ export function MachinesPanel({
       }
       setConfirmingRevokeId(null);
     },
-    [fetchAll, onDeviceChange, onShowToast],
+    [devices, fetchAll, onDeviceChange, onShowToast],
   );
 
   const isAlertEnabled = useCallback(
@@ -526,6 +531,13 @@ export function MachinesPanel({
           if (confirmingRevokeId) revokeDevice(confirmingRevokeId);
         }}
         onCancel={() => setConfirmingRevokeId(null)}
+      />
+
+      {/* Post-revoke cleanup guide */}
+      <CleanupDialog
+        open={cleanupHostname !== null}
+        hostname={cleanupHostname ?? ''}
+        onClose={() => setCleanupHostname(null)}
       />
     </div>
   );

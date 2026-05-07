@@ -834,8 +834,38 @@ async fn delta_sync(
         }
 
         let received_at = chrono::Utc::now().timestamp();
-        for clip in &clips {
-            let local = store::models::LocalClip::from_proto(clip, received_at);
+        for proto_clip in &clips {
+            let mut clip = proto_clip.clone();
+            if clip.encrypted {
+                match client_core::credstore::read_encryption_key(&clip.user_id) {
+                    Some(key) => match client_core::crypto::decrypt(&key, &clip.content) {
+                        Ok(plaintext) => {
+                            let is_binary = clip.media_path.is_some()
+                                || clip.content_type.as_str().starts_with("image");
+                            clip.content = if is_binary {
+                                use base64::Engine;
+                                base64::engine::general_purpose::STANDARD.encode(&plaintext)
+                            } else {
+                                String::from_utf8(plaintext).unwrap_or_else(|e| {
+                                    String::from_utf8_lossy(e.as_bytes()).to_string()
+                                })
+                            };
+                            clip.encrypted = false;
+                        }
+                        Err(e) => {
+                            log::warn!("delta_sync: decryption failed for {}: {}", clip.clip_id, e);
+                        }
+                    },
+                    None => {
+                        log::warn!(
+                            "delta_sync: no encryption key for clip {} (user {})",
+                            clip.clip_id,
+                            clip.user_id
+                        );
+                    }
+                }
+            }
+            let local = store::models::LocalClip::from_proto(&clip, received_at);
             if let Err(e) = db.insert_clip(&local) {
                 log::error!("delta_sync insert failed: {}", e);
             }
