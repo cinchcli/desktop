@@ -79,27 +79,13 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             events::CliHandoffRequested,
             events::SshPairMarkerFound,
             events::OfflineQueueDropped,
-        events::ClipDecryptFailed,
+            events::ClipDecryptFailed,
         ])
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-
-    // CINCH_KEYRING=none: desktop deliberately uses ~/.cinch/config.json (0600) as its
-    // single credential store rather than the OS Keychain. Trade-offs:
-    //   + Single-store determinism: auth_bootstrap::run_joiner_flow writes the canonical
-    //     AES key and ws.rs reads it via credstore::read_encryption_key — both see the
-    //     same plaintext store so there is no keychain-vs-config read-miss.
-    //   + No Tauri-side Keychain permission prompt on first sign-in.
-    //   - Cannot share AES key in-process with a CLI device on the same Mac that uses
-    //     keychain; same-machine sharing relies on the relay key-bundle path (relay treats
-    //     desktop and CLI as separate devices, which is correct).
-    // Revisit if same-machine CLI+desktop key sharing becomes a UX requirement.
-    if std::env::var("CINCH_KEYRING").is_err() {
-        std::env::set_var("CINCH_KEYRING", "none");
-    }
 
     // Load MultiConfig from ~/.cinch/config.json (migrates legacy single-Config format)
     let multi_config = protocol::MultiConfig::load();

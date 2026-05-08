@@ -222,10 +222,8 @@ pub async fn pair_with_token(
         let bs_user = pair_resp.user_id.clone();
         let bs_device = pair_resp.device_id.clone();
         tokio::spawn(async move {
-            crate::auth_bootstrap::run_joiner_flow(
-                &bs_relay, &bs_token, &bs_user, &bs_device,
-            )
-            .await;
+            crate::auth_bootstrap::run_joiner_flow(&bs_relay, &bs_token, &bs_user, &bs_device)
+                .await;
         });
     }
 

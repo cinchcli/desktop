@@ -277,10 +277,8 @@ pub fn sign_in(
             let bs_user = user_id.clone();
             let bs_device = device_id.clone();
             tokio::spawn(async move {
-                crate::auth_bootstrap::run_joiner_flow(
-                    &bs_relay, &bs_token, &bs_user, &bs_device,
-                )
-                .await;
+                crate::auth_bootstrap::run_joiner_flow(&bs_relay, &bs_token, &bs_user, &bs_device)
+                    .await;
             });
 
             let jh = crate::ws::spawn_ws_client(
@@ -470,10 +468,8 @@ pub async fn handle_deeplink(
         let bs_user = user_id.clone();
         let bs_device = device_id.clone();
         tokio::spawn(async move {
-            crate::auth_bootstrap::run_joiner_flow(
-                &bs_relay, &bs_token, &bs_user, &bs_device,
-            )
-            .await;
+            crate::auth_bootstrap::run_joiner_flow(&bs_relay, &bs_token, &bs_user, &bs_device)
+                .await;
         });
     }
 
