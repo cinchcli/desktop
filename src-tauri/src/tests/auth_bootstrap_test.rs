@@ -61,8 +61,7 @@ mod tests {
         // Bearer side: build a valid ECDH bundle so poll_key_bundle returns true.
         let canonical = [0xABu8; 32];
         let (eph_priv, eph_pub) = client_core::crypto::generate_ephemeral_keypair();
-        let shared = client_core::crypto::derive_shared_key(&eph_priv, &joiner_pub)
-            .expect("ECDH");
+        let shared = client_core::crypto::derive_shared_key(&eph_priv, &joiner_pub).expect("ECDH");
         let encrypted_bundle =
             client_core::crypto::encrypt(&shared, &canonical).expect("encrypt bundle");
 
@@ -83,12 +82,6 @@ mod tests {
             .mount(&server)
             .await;
 
-        // poll_key_bundle writes the canonical key to ~/.cinch/config.json.
-        // Tolerate that side-effect in tests (CINCH_KEYRING=none is set by the
-        // desktop runtime; in tests it may or may not be set, but either path
-        // is safe — the test asserts HTTP shape, not the written key value).
-        std::env::set_var("CINCH_KEYRING", "none");
-
         crate::auth_bootstrap::run_joiner_flow_with_privkey(
             &server.uri(),
             "test-token",
@@ -104,6 +97,8 @@ mod tests {
         let shared_joiner =
             client_core::crypto::derive_shared_key(&joiner_priv, &eph_pub).expect("ECDH joiner");
         assert_eq!(shared, shared_joiner, "ECDH must be symmetric");
-        let _ = URL_SAFE_NO_PAD.decode(&joiner_pub).expect("pub is valid base64");
+        let _ = URL_SAFE_NO_PAD
+            .decode(&joiner_pub)
+            .expect("pub is valid base64");
     }
 }

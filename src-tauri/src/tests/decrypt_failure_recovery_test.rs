@@ -36,7 +36,9 @@ mod tests {
         {
             let now = std::time::Instant::now();
             let mut last = gate.lock().await;
-            if last.map_or(false, |t| now.duration_since(t) < std::time::Duration::from_secs(60)) {
+            if last.map_or(false, |t| {
+                now.duration_since(t) < std::time::Duration::from_secs(60)
+            }) {
                 // suppressed — should not happen on first call
             } else {
                 *last = Some(now);
@@ -51,8 +53,9 @@ mod tests {
         {
             let now = std::time::Instant::now();
             let last = gate.lock().await;
-            let suppressed = last
-                .map_or(false, |t| now.duration_since(t) < std::time::Duration::from_secs(60));
+            let suppressed = last.map_or(false, |t| {
+                now.duration_since(t) < std::time::Duration::from_secs(60)
+            });
             drop(last);
             if !suppressed {
                 let client =
@@ -82,8 +85,7 @@ mod tests {
         let token = "tok";
 
         let fire = |relay: String, token: String| async move {
-            let client =
-                client_core::http::RestClient::new(relay, token).unwrap();
+            let client = client_core::http::RestClient::new(relay, token).unwrap();
             client.retry_key_bundle().await.ok();
         };
 
@@ -96,8 +98,9 @@ mod tests {
         {
             let now = std::time::Instant::now();
             let mut last = gate.lock().await;
-            let expired = last
-                .map_or(true, |t| now.duration_since(t) >= std::time::Duration::from_secs(60));
+            let expired = last.map_or(true, |t| {
+                now.duration_since(t) >= std::time::Duration::from_secs(60)
+            });
             if expired {
                 *last = Some(now);
                 drop(last);
@@ -109,8 +112,9 @@ mod tests {
         {
             let now = std::time::Instant::now();
             let last = gate.lock().await;
-            let suppressed =
-                last.map_or(false, |t| now.duration_since(t) < std::time::Duration::from_secs(60));
+            let suppressed = last.map_or(false, |t| {
+                now.duration_since(t) < std::time::Duration::from_secs(60)
+            });
             drop(last);
             if !suppressed {
                 fire(relay.clone(), token.to_string()).await;
@@ -126,8 +130,9 @@ mod tests {
         {
             let now = std::time::Instant::now();
             let mut last = gate.lock().await;
-            let expired = last
-                .map_or(true, |t| now.duration_since(t) >= std::time::Duration::from_secs(60));
+            let expired = last.map_or(true, |t| {
+                now.duration_since(t) >= std::time::Duration::from_secs(60)
+            });
             if expired {
                 *last = Some(now);
                 drop(last);
