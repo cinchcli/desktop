@@ -389,6 +389,8 @@ pub fn run() {
                                         relay_url: &relay,
                                         hostname: &hostname,
                                         device_private_key: None,
+                                        email: "",
+                                        identity_provider: "",
                                     },
                                 ) {
                                     log::error!("deep-link install_credentials failed: {}", e);

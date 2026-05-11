@@ -394,10 +394,7 @@ async fn handle_text_message(
                                 info!("merged relay echo into local clip: {}", clip.clip_id);
                             }
                             Ok(false) => {
-                                info!(
-                                    "no local match for relay echo {}; skipping",
-                                    clip.clip_id
-                                );
+                                info!("no local match for relay echo {}; skipping", clip.clip_id);
                             }
                             Err(e) => {
                                 error!("merge_local_clip_to_relay_id failed: {}", e);
