@@ -360,9 +360,7 @@ pub fn save_config(app: tauri::AppHandle, relay_url: String, token: String) -> R
         return Err("relay_url and token are required".to_string());
     }
     let relay_url = relay_url.trim().trim_end_matches('/').to_string();
-    let hostname = std::env::var("HOSTNAME")
-        .or_else(|_| std::env::var("COMPUTERNAME"))
-        .unwrap_or_else(|_| "unknown".to_string());
+    let hostname = client_core::machine::hostname_or_unknown();
 
     // This command is invoked from the React SetupScreen, which does NOT know
     // user_id or device_id (those come from the relay during /auth/login). Phase 4's

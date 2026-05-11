@@ -197,6 +197,27 @@ export function AddRelayDialog({ onClose, initialRelayUrl, fromCli }: AddRelayDi
       marginTop: -6,
       marginBottom: 10,
     },
+    defaultServerRow: {
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      marginTop: -6,
+      marginBottom: 12,
+    },
+    defaultServerLabel: {
+      fontSize: 11,
+      color: C.t3,
+    },
+    defaultServerBtn: {
+      fontSize: 11,
+      color: C.accent,
+      background: "none",
+      border: "none",
+      padding: 0,
+      cursor: "pointer",
+      fontFamily: "inherit",
+      fontWeight: 500,
+    },
   };
 
   // Renders the sign-in action area based on fetched provider list.
@@ -301,6 +322,18 @@ export function AddRelayDialog({ onClose, initialRelayUrl, fromCli }: AddRelayDi
               onChange={(e) => { setBrowserUrl(e.target.value); setBrowserError(null); }}
               disabled={browserLoading}
             />
+            {!browserUrl && (
+              <div style={S.defaultServerRow}>
+                <span style={S.defaultServerLabel}>Using cinchcli.com?</span>
+                <button
+                  type="button"
+                  style={S.defaultServerBtn}
+                  onClick={() => { setBrowserUrl("https://api.cinchcli.com"); setBrowserError(null); }}
+                >
+                  Use api.cinchcli.com →
+                </button>
+              </div>
+            )}
             {browserError && <div style={S.errorText}>{browserError}</div>}
             {renderBrowserActions()}
           </>

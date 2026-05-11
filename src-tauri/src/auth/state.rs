@@ -32,6 +32,7 @@ pub enum AuthState {
         hostname: String,
         relay_url: String,
         active_relay_id: String,
+        machine_id: String,
     },
     ErrorRecoverable {
         reason: AuthErrorReason,
@@ -98,6 +99,7 @@ pub enum AuthEvent {
         hostname: String,
         relay_url: String,
         active_relay_id: String,
+        machine_id: String,
     },
     PairFailure {
         kind: PairFailureKind,
@@ -143,6 +145,7 @@ pub fn classify_next_state(current: &AuthState, event: &AuthEvent) -> AuthState 
             hostname: String::new(),
             relay_url: String::new(),
             active_relay_id: String::new(),
+            machine_id: String::new(),
         }, // caller fills in payload from Config::load (optimistic — reverts on WS 401 per D-15)
 
         AuthEvent::ClickSignIn => AuthState::Authenticating {
@@ -158,12 +161,14 @@ pub fn classify_next_state(current: &AuthState, event: &AuthEvent) -> AuthState 
             hostname,
             relay_url,
             active_relay_id,
+            machine_id,
         } => AuthState::Authenticated {
             user_id: user_id.clone(),
             device_id: device_id.clone(),
             hostname: hostname.clone(),
             relay_url: relay_url.clone(),
             active_relay_id: active_relay_id.clone(),
+            machine_id: machine_id.clone(),
         },
 
         AuthEvent::PairFailure {
@@ -271,6 +276,7 @@ mod tests {
             hostname: u("macbook"),
             relay_url: u("http://localhost:8080"),
             active_relay_id: u("relay_01"),
+            machine_id: u(""),
         }
     }
 
@@ -334,6 +340,7 @@ mod tests {
                     hostname: u("h"),
                     relay_url: u("r"),
                     active_relay_id: u("relay_01"),
+                    machine_id: u(""),
                 },
             ),
             AuthState::Authenticated { .. }

@@ -590,6 +590,7 @@ async fn handle_text_message(
                                 hostname: p.hostname.clone(),
                                 relay_url: p.relay_url.clone(),
                                 active_relay_id: p.id.clone(),
+                                machine_id: p.machine_id.clone(),
                             },
                         );
                     }

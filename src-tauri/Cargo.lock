@@ -635,7 +635,7 @@ dependencies = [
 
 [[package]]
 name = "cinch-desktop"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -695,6 +695,7 @@ dependencies = [
  "dirs 6.0.0",
  "futures-util",
  "hkdf",
+ "hostname",
  "keyring",
  "proto-cinch",
  "reqwest 0.12.28",
@@ -2211,6 +2212,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6303bc9732ae41b04cb554b844a762b4115a61bfaa81e3e83050991eeb56863f"
 dependencies = [
  "digest 0.11.2",
+]
+
+[[package]]
+name = "hostname"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "617aaa3557aef3810a6369d0a99fac8a080891b68bd9f9812a1eeda0c0730cbd"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "windows-link 0.2.1",
 ]
 
 [[package]]

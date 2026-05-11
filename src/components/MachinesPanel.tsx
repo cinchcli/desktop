@@ -12,6 +12,7 @@ import { AddSshMachineDialog } from './AddSshMachineDialog';
 
 interface MachinesPanelProps {
   currentDeviceID: string;
+  currentMachineId?: string;
   onShowToast: (message: string) => void;
   onDeviceChange?: () => void;
 }
@@ -31,6 +32,7 @@ function settingsToAlertMap(settings: SourceAlertSetting[]): Record<string, bool
 
 export function MachinesPanel({
   currentDeviceID,
+  currentMachineId = '',
   onShowToast,
   onDeviceChange,
 }: MachinesPanelProps) {
@@ -82,7 +84,11 @@ export function MachinesPanel({
   // machines (sources without a matching device), then local.
   const merged: MergedEntry[] = (() => {
     const deviceSourceKeys = new Set(devices.map((d) => d.source_key));
-    const currentDeviceIsPaired = devices.some((d) => d.id === currentDeviceID);
+    const currentDeviceIsPaired = devices.some(
+      (d) =>
+        d.id === currentDeviceID ||
+        (currentMachineId !== '' && d.machine_id === currentMachineId),
+    );
     const entries: MergedEntry[] = devices.map((d) => ({
       kind: 'device',
       device: d,
@@ -391,7 +397,9 @@ export function MachinesPanel({
 
           // entry.kind === "device"
           const device = entry.device;
-          const isCurrentDevice = device.id === currentDeviceID;
+          const isCurrentDevice =
+            device.id === currentDeviceID ||
+            (currentMachineId !== '' && device.machine_id === currentMachineId);
           const isEditing = editingDeviceId === device.id;
           const displayName = device.nickname || device.hostname || '';
           const pillVars = sourcePillVars(device.source_key ?? device.id ?? '');

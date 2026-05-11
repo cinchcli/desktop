@@ -410,6 +410,8 @@ function App() {
 
   const currentDeviceID =
     auth.variant === 'Authenticated' ? auth.payload.device_id : '';
+  const currentMachineId =
+    auth.variant === 'Authenticated' ? auth.payload.machine_id : '';
 
   const handoffDialog = handoffRelay !== null ? (
     <AddRelayDialog
@@ -488,6 +490,7 @@ function App() {
         {activePanel === 'machines' ? (
           <MachinesPanel
             currentDeviceID={currentDeviceID}
+            currentMachineId={currentMachineId}
             onShowToast={(msg) => showToast(msg, 'copy')}
             onDeviceChange={refreshDevices}
           />

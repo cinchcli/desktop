@@ -47,9 +47,7 @@ pub fn sign_in(
         return Err("relay_url required".into());
     }
 
-    let hostname = std::env::var("HOSTNAME")
-        .or_else(|_| std::env::var("COMPUTERNAME"))
-        .unwrap_or_else(|_| "unknown".to_string());
+    let hostname = client_core::machine::hostname_or_unknown();
     let app2 = app.clone();
     let handle2 = auth_handle.clone();
     let relay2 = relay;
@@ -268,6 +266,7 @@ pub fn sign_in(
                     hostname: hostname2.clone(),
                     relay_url: relay2.clone(),
                     active_relay_id: active_relay_id.clone(),
+                    machine_id: machine_id.clone(),
                 },
             );
 
@@ -363,9 +362,7 @@ pub async fn handle_deeplink(
     // Validate relay_url scheme and host (prevents deep-link relay hijack)
     crate::validate_relay_url(&relay_url).map_err(|e| format!("invalid relay_url: {}", e))?;
 
-    let hostname = std::env::var("HOSTNAME")
-        .or_else(|_| std::env::var("COMPUTERNAME"))
-        .unwrap_or_else(|_| "unknown".to_string());
+    let hostname = client_core::machine::hostname_or_unknown();
 
     // Check if this is an "add new relay" flow or "update active relay" flow
     let pending_info = pending.take();
@@ -434,6 +431,7 @@ pub async fn handle_deeplink(
             hostname: hostname.clone(),
             relay_url: relay_url.clone(),
             active_relay_id: active_relay_id.clone(),
+            machine_id: client_core::machine::stable_machine_id(),
         },
     );
 
