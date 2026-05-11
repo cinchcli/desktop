@@ -105,9 +105,7 @@ pub async fn pair_with_token(
         return Err("pair_token required".into());
     }
 
-    let hostname = std::env::var("HOSTNAME")
-        .or_else(|_| std::env::var("COMPUTERNAME"))
-        .unwrap_or_else(|_| "unknown".to_string());
+    let hostname = client_core::machine::hostname_or_unknown();
 
     let (priv_b64, pub_b64) = crate::crypto::generate_ephemeral_keypair();
 
@@ -209,6 +207,7 @@ pub async fn pair_with_token(
             hostname: profile.hostname.clone(),
             relay_url: profile.relay_url.clone(),
             active_relay_id: profile.id.clone(),
+            machine_id: profile.machine_id.clone(),
         };
         (profile.relay_url.clone(), token, next_state)
     };

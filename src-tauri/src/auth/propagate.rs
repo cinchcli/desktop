@@ -154,6 +154,7 @@ pub(crate) fn next_state_from_config(cfg: &crate::protocol::Config) -> AuthState
             hostname: cfg.hostname.clone(),
             relay_url: cfg.relay_url.clone(),
             active_relay_id: active_relay_id.clone(),
+            machine_id: client_core::machine::stable_machine_id(),
         },
         Err(_) => AuthState::LocalOnly,
     }

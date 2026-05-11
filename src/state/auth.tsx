@@ -27,6 +27,7 @@ export type AuthenticatedPayload = {
     hostname: string;
     relay_url: string;
     active_relay_id: string;
+    machine_id: string;
 };
 
 export type ErrorRecoverablePayload = {

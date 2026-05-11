@@ -244,6 +244,7 @@ pub fn run() {
                         hostname: config_for_auth_seed.hostname.clone(),
                         relay_url: config_for_auth_seed.relay_url.clone(),
                         active_relay_id: active_relay_id_seed.clone(),
+                        machine_id: client_core::machine::stable_machine_id(),
                     }
                 } else {
                     AuthState::LocalOnly
@@ -337,9 +338,7 @@ pub fn run() {
                                 return;
                             }
 
-                            let hostname = std::env::var("HOSTNAME")
-                                .or_else(|_| std::env::var("COMPUTERNAME"))
-                                .unwrap_or_else(|_| "unknown".to_string());
+                            let hostname = client_core::machine::hostname_or_unknown();
 
                             let pending_info = dl_pending.take();
                             let active_relay_id = if let Some(info) = pending_info {
@@ -417,6 +416,7 @@ pub fn run() {
                                     hostname: hostname.clone(),
                                     relay_url: relay.clone(),
                                     active_relay_id: active_relay_id.clone(),
+                                    machine_id: client_core::machine::stable_machine_id(),
                                 },
                             );
 

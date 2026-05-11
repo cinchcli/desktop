@@ -453,6 +453,7 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
             </div>
             <MachinesPanel
               currentDeviceID={auth.variant === "Authenticated" ? auth.payload.device_id : ""}
+              currentMachineId={auth.variant === "Authenticated" ? auth.payload.machine_id : ""}
               onShowToast={() => {}}
             />
 

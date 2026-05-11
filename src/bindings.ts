@@ -150,6 +150,7 @@ export type AuthState = { variant: "LocalOnly" } | { variant: "Authenticating"; 
 	hostname: string,
 	relay_url: string,
 	active_relay_id: string,
+	machine_id: string,
 } } | { variant: "ErrorRecoverable"; payload: {
 	reason: AuthErrorReason,
 	retry_after_ms: number | null,
@@ -198,6 +199,7 @@ export type Device = {
 	nickname?: string,
 	public_key?: string,
 	public_key_fingerprint?: string,
+	machine_id?: string | null,
 };
 
 export type ImageDownloadComplete = string;
