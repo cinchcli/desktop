@@ -370,7 +370,7 @@ function App() {
         if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
           if (!window.getSelection()?.toString()) copyClip(selectedClip);
         }
-        if ((e.metaKey || e.ctrlKey) && e.key === 'p' && !(e.target instanceof HTMLInputElement)) {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'p' && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
           e.preventDefault();
           if (selectedClip.is_pinned) {
             handleUnpin(selectedClip);

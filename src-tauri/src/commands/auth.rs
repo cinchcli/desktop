@@ -236,6 +236,8 @@ pub fn sign_in(
                     relay_url: &relay2,
                     hostname: &hostname2,
                     device_private_key: None,
+                    email: "",
+                    identity_provider: "",
                 },
             ) {
                 log::error!("sign_in: install_credentials failed: {}", e);
@@ -408,6 +410,8 @@ pub async fn handle_deeplink(
             relay_url: &relay_url,
             hostname: &hostname,
             device_private_key: None,
+            email: "",
+            identity_provider: "",
         })
         .map_err(|e| format!("persist creds: {}", e))?;
 

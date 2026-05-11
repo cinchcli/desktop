@@ -611,7 +611,11 @@ impl Database {
     /// local ULID with the relay-assigned ID so that relay-driven deletions
     /// can resolve the clip. Matches by content against the most recent local
     /// clip. Returns `true` if a match was found and updated.
-    pub fn merge_local_clip_to_relay_id(&self, relay_id: &str, content: &str) -> Result<bool, String> {
+    pub fn merge_local_clip_to_relay_id(
+        &self,
+        relay_id: &str,
+        content: &str,
+    ) -> Result<bool, String> {
         let conn = self.conn.lock().unwrap();
         let old_id: Option<String> = conn
             .query_row(
