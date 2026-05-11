@@ -1,5 +1,5 @@
 use log::info;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -605,6 +605,36 @@ impl Database {
         )
         .map_err(|e| format!("mark_synced failed: {}", e))?;
         Ok(())
+    }
+
+    /// When the relay echoes back a locally-captured text clip, replace the
+    /// local ULID with the relay-assigned ID so that relay-driven deletions
+    /// can resolve the clip. Matches by content against the most recent local
+    /// clip. Returns `true` if a match was found and updated.
+    pub fn merge_local_clip_to_relay_id(&self, relay_id: &str, content: &str) -> Result<bool, String> {
+        let conn = self.conn.lock().unwrap();
+        let old_id: Option<String> = conn
+            .query_row(
+                "SELECT id FROM clips WHERE content = ?1 AND source = 'local' \
+                 ORDER BY created_at DESC LIMIT 1",
+                params![content],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| format!("merge_local_clip_to_relay_id lookup failed: {}", e))?;
+
+        match old_id {
+            Some(ref oid) if oid != relay_id => {
+                conn.execute(
+                    "UPDATE clips SET id = ?1 WHERE id = ?2",
+                    params![relay_id, oid],
+                )
+                .map_err(|e| format!("merge_local_clip_to_relay_id update failed: {}", e))?;
+                Ok(true)
+            }
+            Some(_) => Ok(false), // relay_id already matches — no-op
+            None => Ok(false),
+        }
     }
 
     /// Enforce the offline queue cap by dropping the oldest unsynced clips

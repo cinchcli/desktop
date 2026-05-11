@@ -379,6 +379,36 @@ async fn handle_text_message(
                     }
                 }
 
+                // Local-source clips are echoes of clips this device pushed to the
+                // relay (via the offline queue on reconnect). The monitor already
+                // captured and stored them. Merge the relay-assigned ID into the
+                // existing local record so relay-driven deletions resolve, then
+                // skip auto-copy, notifications, and a duplicate ClipReceived emit.
+                if clip.source == "local" {
+                    if !clip.content.is_empty() {
+                        match db.merge_local_clip_to_relay_id(&clip.clip_id, &clip.content) {
+                            Ok(true) => {
+                                let local_clip =
+                                    LocalClip::from_proto(&clip, chrono::Utc::now().timestamp());
+                                crate::events::ClipReceived(local_clip).emit(app).ok();
+                                info!("merged relay echo into local clip: {}", clip.clip_id);
+                            }
+                            Ok(false) => {
+                                info!(
+                                    "no local match for relay echo {}; skipping",
+                                    clip.clip_id
+                                );
+                            }
+                            Err(e) => {
+                                error!("merge_local_clip_to_relay_id failed: {}", e);
+                            }
+                        }
+                    } else {
+                        info!("skipping relay echo of local image clip: {}", clip.clip_id);
+                    }
+                    return;
+                }
+
                 info!(
                     "received clip: {} from {} ({} bytes)",
                     clip.clip_id, clip.source, clip.byte_size
