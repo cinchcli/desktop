@@ -100,7 +100,7 @@ function ClipRow({ clip, selected, onClick, onDoubleClick, nickname }: ClipRowPr
 
 const S: Record<string, CSSProperties> = {
   col: {
-    width: 320,
+    width: 'var(--list-width, 320px)',
     flexShrink: 0,
     background: C.card,
     borderRight: `1px solid ${C.border}`,
