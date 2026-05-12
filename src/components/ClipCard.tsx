@@ -58,6 +58,12 @@ export function ClipCard({ clip, selected, onCopy, onDelete, onClick, onDoubleCl
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       onDoubleClick={onDoubleClick}
     >
       {/* Left column: type glyph or thumbnail */}
