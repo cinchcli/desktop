@@ -107,7 +107,7 @@ const S: Record<string, CSSProperties> = {
     overflowY: 'auto',
   },
   sectionLabel: {
-    padding: '14px 18px 6px',
+    padding: 'var(--sp-md) var(--sp-lg) var(--sp-sm)',
     fontFamily: 'var(--font-mono)',
     fontSize: 11,
     fontWeight: 600,
@@ -116,7 +116,7 @@ const S: Record<string, CSSProperties> = {
     color: C.t2,
   },
   row: {
-    padding: '11px 18px',
+    padding: 'var(--sp-md) var(--sp-lg)',
     display: 'flex',
     flexDirection: 'column',
     gap: 4,
@@ -147,7 +147,7 @@ const S: Record<string, CSSProperties> = {
     color: C.t3,
   },
   empty: {
-    padding: '40px 20px',
+    padding: '40px var(--sp-xl)',
     textAlign: 'center',
   },
   emptyTitle: { color: C.t2, fontSize: 13, marginBottom: 6 },
