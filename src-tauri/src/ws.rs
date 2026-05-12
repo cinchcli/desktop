@@ -14,8 +14,8 @@ use crate::auth::AuthStateHandle;
 use crate::clipboard::backend::PollContent;
 use crate::clipboard::ClipboardService;
 use crate::protocol::{
-    WSMessage, ACTION_CLIP_DELETED, ACTION_KEY_EXCHANGE_REQUESTED, ACTION_NEW_CLIP, ACTION_PING,
-    ACTION_REVOKED, ACTION_SEND_CLIPBOARD, ACTION_TOKEN_ROTATED,
+    WSMessage, ACTION_CLIP_DELETED, ACTION_CLIP_PINNED, ACTION_KEY_EXCHANGE_REQUESTED,
+    ACTION_NEW_CLIP, ACTION_PING, ACTION_REVOKED, ACTION_SEND_CLIPBOARD, ACTION_TOKEN_ROTATED,
 };
 use crate::store::{db::Database, models::LocalClip};
 use crate::tray::{self, TrayState};
@@ -543,6 +543,28 @@ async fn handle_text_message(
                     .ok();
             }
         }
+        ACTION_CLIP_PINNED => {
+            if let Some(clip) = &msg.clip {
+                info!(
+                    "clip pin changed: {} is_pinned={}",
+                    clip.clip_id, clip.is_pinned
+                );
+                if clip.is_pinned {
+                    if let Err(e) = db.pin_clip(&clip.clip_id, clip.pin_note.as_deref()) {
+                        error!("db pin_clip failed: {}", e);
+                    }
+                } else if let Err(e) = db.unpin_clip(&clip.clip_id) {
+                    error!("db unpin_clip failed: {}", e);
+                }
+                crate::events::ClipPinned {
+                    clip_id: clip.clip_id.clone(),
+                    is_pinned: clip.is_pinned,
+                    pin_note: clip.pin_note.clone(),
+                }
+                .emit(app)
+                .ok();
+            }
+        }
         ACTION_REVOKED => {
             info!("WS: device revoked (reason={:?})", msg.reason);
             // Wipe local credentials best-effort.
@@ -565,7 +587,12 @@ async fn handle_text_message(
                 log::warn!("WS token_rotated: missing token or device_id in payload");
                 return;
             };
-            let hostname = msg.hostname.as_deref().unwrap_or("unknown").to_string();
+            let hostname = msg
+                .hostname
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .unwrap_or_else(client_core::machine::hostname_or_unknown);
 
             // Brief transition through Authenticating{RotatingToken}.
             let current = auth_handle.lock().unwrap().clone();

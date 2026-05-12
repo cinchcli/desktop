@@ -158,18 +158,49 @@ pub fn list_pinned_clips(db: State<'_, Arc<Database>>) -> Result<Vec<LocalClip>,
 
 #[tauri::command]
 #[specta::specta]
-pub fn pin_clip(
+pub async fn pin_clip(
     db: State<'_, Arc<Database>>,
+    mc: State<'_, MultiConfigHandle>,
     id: String,
     note: Option<String>,
 ) -> Result<(), String> {
-    db.pin_clip(&id, note.as_deref())
+    db.pin_clip(&id, note.as_deref())?;
+    if let Ok((relay_url, token)) = resolve_active_creds(&mc) {
+        match client_core::http::RestClient::new(relay_url, token) {
+            Ok(client) => {
+                if let Err(e) = client.set_clip_pin(&id, true, note.as_deref()).await {
+                    log::warn!("relay set_clip_pin failed for {}: {}", id, e);
+                }
+            }
+            Err(e) => {
+                log::warn!("could not build REST client for pin_clip {}: {}", id, e);
+            }
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn unpin_clip(db: State<'_, Arc<Database>>, id: String) -> Result<(), String> {
-    db.unpin_clip(&id)
+pub async fn unpin_clip(
+    db: State<'_, Arc<Database>>,
+    mc: State<'_, MultiConfigHandle>,
+    id: String,
+) -> Result<(), String> {
+    db.unpin_clip(&id)?;
+    if let Ok((relay_url, token)) = resolve_active_creds(&mc) {
+        match client_core::http::RestClient::new(relay_url, token) {
+            Ok(client) => {
+                if let Err(e) = client.set_clip_pin(&id, false, None).await {
+                    log::warn!("relay unpin_clip failed for {}: {}", id, e);
+                }
+            }
+            Err(e) => {
+                log::warn!("could not build REST client for unpin_clip {}: {}", id, e);
+            }
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]

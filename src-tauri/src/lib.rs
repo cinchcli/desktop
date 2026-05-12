@@ -80,6 +80,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             events::SshPairMarkerFound,
             events::OfflineQueueDropped,
             events::ClipDecryptFailed,
+            events::ClipPinned,
         ])
 }
 

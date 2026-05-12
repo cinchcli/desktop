@@ -27,6 +27,7 @@ export function SourcePill({ source, nickname }: SourcePillProps) {
         fontSize: 10,
         fontFamily: 'var(--font-mono)',
         letterSpacing: '0.04em',
+        textTransform: 'none',
         whiteSpace: 'nowrap',
         textOverflow: 'ellipsis',
         flexShrink: 0,

@@ -68,3 +68,12 @@ pub struct ClipDecryptFailed {
     /// "missing_key" or "tag_failed: <detail>"
     pub reason: String,
 }
+
+/// Fired when a clip's pin state changes (from relay WS broadcast or local pin/unpin).
+/// React listens to refresh the pinned-clips list on any device.
+#[derive(Clone, Serialize, Deserialize, Type, Event)]
+pub struct ClipPinned {
+    pub clip_id: String,
+    pub is_pinned: bool,
+    pub pin_note: Option<String>,
+}

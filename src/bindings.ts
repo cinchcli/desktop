@@ -118,6 +118,7 @@ export const events = {
 	cliHandoffRequested: makeEvent<CliHandoffRequested>("cli-handoff-requested"),
 	clipDecryptFailed: makeEvent<ClipDecryptFailed>("clip-decrypt-failed"),
 	clipDeleted: makeEvent<ClipDeleted>("clip-deleted"),
+	clipPinned: makeEvent<ClipPinned>("clip-pinned"),
 	clipReceived: makeEvent<ClipReceived>("clip-received"),
 	imageDownloadComplete: makeEvent<ImageDownloadComplete>("image-download-complete"),
 	imageDownloadFailed: makeEvent<ImageDownloadFailed>("image-download-failed"),
@@ -179,6 +180,16 @@ export type ClipDecryptFailed = {
 };
 
 export type ClipDeleted = string;
+
+/**
+ *  Fired when a clip's pin state changes (from relay WS broadcast or local pin/unpin).
+ *  React listens to refresh the pinned-clips list on any device.
+ */
+export type ClipPinned = {
+	clip_id: string,
+	is_pinned: boolean,
+	pin_note: string | null,
+};
 
 export type ClipReceived = LocalClip;
 
