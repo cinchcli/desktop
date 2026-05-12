@@ -264,7 +264,7 @@ const S: Record<string, CSSProperties> = {
   },
   metaVal: { color: C.t1, margin: 0, wordBreak: 'break-all' },
   highlight: {
-    background: 'rgba(255, 193, 7, 0.35)',
+    background: 'var(--highlight)',
     borderRadius: 2,
     padding: '0 1px',
     color: 'inherit',
