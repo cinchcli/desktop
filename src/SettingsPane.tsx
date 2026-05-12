@@ -67,7 +67,7 @@ async function registerWindowShortcut(shortcut: string): Promise<void> {
 export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) {
   const titleId = useId();
   const auth = useAuthState();
-  const [activeTab, setActiveTab] = useState<"general" | "servers">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "shortcuts" | "servers">("general");
   const [addRelayOpen, setAddRelayOpen] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [state, setState] = useState<LoadState>({ kind: "loading" });
@@ -380,7 +380,7 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
       <div style={styles.pane}>
         {/* Tab bar */}
         <div style={{ display: "flex", gap: 4, marginBottom: 24, borderBottom: `1px solid ${C.border}`, paddingBottom: 0 }}>
-          {(["general", "servers"] as const).map((tab) => (
+          {(["general", "shortcuts", "servers"] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -471,6 +471,126 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
           </>
         )}
 
+        {/* Shortcuts tab */}
+        {activeTab === "shortcuts" && (
+          <>
+            <div style={styles.section}>
+              <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.012em', color: C.t1, marginBottom: 4 }}>
+                Launch shortcut
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 500, color: C.t3, marginBottom: 12 }}>
+                Press a new key combination to change the global show-window shortcut.
+              </div>
+              <input
+                type="text"
+                readOnly
+                value={shortcutSaving ? "Saving…" : shortcutInput}
+                onKeyDown={handleShortcutKeyDown}
+                placeholder="Press a shortcut…"
+                aria-label="Global launch shortcut"
+                style={{
+                  background: C.card,
+                  border: `1px solid ${shortcutError ? C.error : C.border}`,
+                  borderRadius: 6,
+                  color: C.t1,
+                  fontSize: 14,
+                  fontWeight: 500,
+                  padding: "7px 12px",
+                  outline: "none",
+                  cursor: "pointer",
+                  letterSpacing: "0.5px",
+                  minWidth: 140,
+                }}
+              />
+              {shortcutError && (
+                <div style={{ ...styles.errorRegion, marginTop: 6 }}>{shortcutError}</div>
+              )}
+            </div>
+
+            <hr style={styles.sectionDivider} />
+
+            <div style={styles.section}>
+              <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.012em', color: C.t1, marginBottom: 12 }}>
+                Built-in shortcuts
+              </div>
+              {([
+                {
+                  group: "Navigation",
+                  rows: [
+                    { keys: ["↑", "↓"], desc: "Move between clips" },
+                    { keys: ["j", "k"], desc: "Move between clips (vim)" },
+                    { keys: ["Tab"], desc: "Switch between All / Pinned" },
+                  ],
+                },
+                {
+                  group: "Actions",
+                  rows: [
+                    { keys: ["⌘C"], desc: "Copy selected clip" },
+                    { keys: ["⌘P"], desc: "Pin / unpin selected clip" },
+                    { keys: ["⌘⌫"], desc: "Delete selected clip" },
+                  ],
+                },
+                {
+                  group: "Search",
+                  rows: [
+                    { keys: ["⌘F", "/"], desc: "Focus search" },
+                    { keys: ["Esc"], desc: "Clear search / deselect" },
+                  ],
+                },
+                {
+                  group: "General",
+                  rows: [
+                    { keys: ["⌘,"], desc: "Open settings" },
+                    { keys: ["Esc"], desc: "Close settings" },
+                  ],
+                },
+              ] as const).map(({ group, rows }) => (
+                <div key={group} style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.6px", color: C.t3, textTransform: "uppercase", marginBottom: 6 }}>
+                    {group}
+                  </div>
+                  <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
+                    {rows.map((row, i) => (
+                      <div
+                        key={row.desc}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "8px 14px",
+                          borderTop: i > 0 ? `1px solid ${C.border}` : "none",
+                        }}
+                      >
+                        <span style={{ fontSize: 13, fontWeight: 500, color: C.t2 }}>{row.desc}</span>
+                        <div style={{ display: "flex", gap: 4 }}>
+                          {row.keys.map((k) => (
+                            <kbd
+                              key={k}
+                              style={{
+                                background: C.bg,
+                                border: `1px solid ${C.border}`,
+                                borderRadius: 4,
+                                color: C.t1,
+                                fontFamily: "inherit",
+                                fontSize: 12,
+                                fontWeight: 600,
+                                padding: "2px 7px",
+                                letterSpacing: "0.2px",
+                              }}
+                            >
+                              {k}
+                            </kbd>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
         {/* General tab */}
         {activeTab === "general" && state.kind === "loading" && (
           <div style={styles.loading}>Loading retention settings…</div>
@@ -528,51 +648,6 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
                 Clips from password managers (1Password, Bitwarden, LastPass,
                 Keychain Access) and concealed pasteboard types are never saved.
               </div>
-            </div>
-
-            <hr style={styles.sectionDivider} />
-
-            <div style={styles.section}>
-              <div style={{
-                fontSize: 15, fontWeight: 600, letterSpacing: '-0.012em', color: C.t1,
-                marginBottom: 4,
-              }}>
-                Global shortcut
-              </div>
-              <div style={{
-                fontSize: 12, fontWeight: 500, color: C.t3, marginBottom: 12,
-              }}>
-                Show/focus window
-              </div>
-              <input
-                style={{
-                  background: C.bg,
-                  border: `1px solid ${shortcutError ? C.error : C.border}`,
-                  borderRadius: 8,
-                  padding: "7px 10px",
-                  color: C.t1,
-                  fontSize: 14,
-                  fontWeight: 500,
-                  fontFamily: "inherit",
-                  outline: "none",
-                  width: 220,
-                  maxWidth: "100%",
-                  boxSizing: "border-box" as const,
-                  caretColor: "transparent",
-                  cursor: "pointer",
-                  opacity: shortcutSaving ? 0.5 : 1,
-                }}
-                value={shortcutInput}
-                readOnly
-                onKeyDown={handleShortcutKeyDown}
-                placeholder={formatShortcutDisplay(currentShortcut)}
-                aria-label="Global shortcut"
-              />
-              {shortcutError && (
-                <div style={{ fontSize: 12, fontWeight: 500, color: C.error, marginTop: 6 }}>
-                  {shortcutError}
-                </div>
-              )}
             </div>
 
             <hr style={styles.sectionDivider} />

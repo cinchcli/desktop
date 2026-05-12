@@ -11,6 +11,7 @@ interface AddRelayDialogProps {
   /// to indicate the dialog was opened by a CLI handoff (cinch://login).
   initialRelayUrl?: string;
   fromCli?: boolean;
+  hideClose?: boolean;
 }
 
 type Method = "browser" | "token";
@@ -30,7 +31,7 @@ async function fetchProviders(relayUrl: string): Promise<Provider[]> {
   }
 }
 
-export function AddRelayDialog({ onClose, initialRelayUrl, fromCli }: AddRelayDialogProps) {
+export function AddRelayDialog({ onClose, initialRelayUrl, fromCli, hideClose }: AddRelayDialogProps) {
   const [method, setMethod] = useState<Method>("browser");
 
   // Browser method
@@ -283,20 +284,22 @@ export function AddRelayDialog({ onClose, initialRelayUrl, fromCli }: AddRelayDi
   };
 
   return (
-    <div style={S.overlay} onClick={onClose} role="presentation">
+    <div style={S.overlay} onClick={hideClose ? undefined : onClose} role="presentation">
       <div style={S.pane} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div style={S.titleRow}>
           <div style={{ fontSize: 16, fontWeight: 600 }}>
             {fromCli ? "Sign in to share with CLI" : "Connect to relay"}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            style={{ background: "none", border: "none", cursor: "pointer", color: C.t2, padding: 4 }}
-          >
-            <IconX size={14} />
-          </button>
+          {!hideClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              style={{ background: "none", border: "none", cursor: "pointer", color: C.t2, padding: 4 }}
+            >
+              <IconX size={14} />
+            </button>
+          )}
         </div>
 
         {!fromCli && (

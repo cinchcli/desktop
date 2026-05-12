@@ -61,14 +61,16 @@ describe("SettingsPane", () => {
   describe("Global shortcut field", () => {
     it("renders the global shortcut input with label", async () => {
       render(<SettingsPane onClose={() => {}} clipCount={0} />);
-      const input = await screen.findByLabelText("Global shortcut");
+      fireEvent.click(screen.getByText("shortcuts"));
+      const input = await screen.findByLabelText("Global launch shortcut");
       expect(input).toBeInTheDocument();
-      expect(screen.getByText("Show/focus window")).toBeInTheDocument();
+      expect(screen.getByText(/Press a new key combination/i)).toBeInTheDocument();
     });
 
     it("displays the shortcut in macOS symbol format", async () => {
       render(<SettingsPane onClose={() => {}} clipCount={0} />);
-      const input = await screen.findByLabelText("Global shortcut");
+      fireEvent.click(screen.getByText("shortcuts"));
+      const input = await screen.findByLabelText("Global launch shortcut");
       // CmdOrCtrl+Shift+V should display as command+shift+V symbols
       await waitFor(() => {
         expect(input).toHaveValue("\u2318\u21E7V");
@@ -77,7 +79,8 @@ describe("SettingsPane", () => {
 
     it("shows error for key press without modifier", async () => {
       render(<SettingsPane onClose={() => {}} clipCount={0} />);
-      const input = await screen.findByLabelText("Global shortcut");
+      fireEvent.click(screen.getByText("shortcuts"));
+      const input = await screen.findByLabelText("Global launch shortcut");
       fireEvent.keyDown(input, {
         key: "v",
         metaKey: false,
@@ -92,7 +95,8 @@ describe("SettingsPane", () => {
 
     it("ignores modifier-only presses", async () => {
       render(<SettingsPane onClose={() => {}} clipCount={0} />);
-      const input = await screen.findByLabelText("Global shortcut");
+      fireEvent.click(screen.getByText("shortcuts"));
+      const input = await screen.findByLabelText("Global launch shortcut");
       fireEvent.keyDown(input, {
         key: "Meta",
         metaKey: true,
@@ -109,7 +113,8 @@ describe("SettingsPane", () => {
 
     it("captures modifier+key combination and persists", async () => {
       render(<SettingsPane onClose={() => {}} clipCount={0} />);
-      const input = await screen.findByLabelText("Global shortcut");
+      fireEvent.click(screen.getByText("shortcuts"));
+      const input = await screen.findByLabelText("Global launch shortcut");
       fireEvent.keyDown(input, {
         key: "b",
         metaKey: true,
@@ -139,7 +144,8 @@ describe("SettingsPane", () => {
       });
 
       render(<SettingsPane onClose={() => {}} clipCount={0} />);
-      const input = await screen.findByLabelText("Global shortcut");
+      fireEvent.click(screen.getByText("shortcuts"));
+      const input = await screen.findByLabelText("Global launch shortcut");
       fireEvent.keyDown(input, {
         key: "x",
         metaKey: true,
@@ -155,7 +161,7 @@ describe("SettingsPane", () => {
     it("does not expose editable filter rules", async () => {
       render(<SettingsPane onClose={() => {}} clipCount={0} />);
 
-      await screen.findByLabelText("Global shortcut");
+      await screen.findByText("Local retention");
 
       expect(screen.queryByText("Clip filters")).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Save filter rules" })).not.toBeInTheDocument();
