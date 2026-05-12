@@ -9,7 +9,7 @@ pub use client_core::config::{
     default_relay_url, Config, MultiConfig, MultiConfigHandle, RelayProfile,
 };
 pub use client_core::protocol::{
-    Clip, DeviceInfo, WSMessage, ACTION_CLIPBOARD_CONTENT, ACTION_CLIP_DELETED,
+    Clip, DeviceInfo, WSMessage, ACTION_CLIPBOARD_CONTENT, ACTION_CLIP_DELETED, ACTION_CLIP_PINNED,
     ACTION_KEY_EXCHANGE_REQUESTED, ACTION_NEW_CLIP, ACTION_PING, ACTION_PONG, ACTION_REVOKED,
     ACTION_SEND_CLIPBOARD, ACTION_TOKEN_ROTATED,
 };

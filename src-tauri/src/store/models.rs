@@ -36,8 +36,8 @@ impl LocalClip {
             media_path: clip.media_path.clone(),
             created_at,
             synced: true,
-            is_pinned: false,
-            pin_note: None,
+            is_pinned: clip.is_pinned,
+            pin_note: clip.pin_note.clone(),
             received_at,
         }
     }
@@ -142,6 +142,8 @@ mod tests {
             media_path: None,
             created_at: "2026-04-14T12:00:00Z".into(),
             encrypted: false,
+            is_pinned: false,
+            pin_note: None,
         };
         let local = LocalClip::from_proto(&proto, chrono::Utc::now().timestamp());
         assert_eq!(local.content_type, "json"); // detected client-side
