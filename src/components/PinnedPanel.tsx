@@ -98,6 +98,12 @@ function PinnedRow({
       tabIndex={0}
       style={{ ...S.row, ...(selected ? S.rowActive : {}) }}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       onDoubleClick={onDoubleClick}
     >
       <span style={S.preview}>{preview || ' '}</span>
