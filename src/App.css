@@ -68,6 +68,19 @@
   --radius-xl: 14px;
 
   color-scheme: dark;
+  --list-width: 320px;
+}
+
+@media (max-width: 800px) {
+  :root {
+    --list-width: 280px;
+  }
+}
+
+@media (min-width: 1100px) {
+  :root {
+    --list-width: 380px;
+  }
 }
 
 /* Light theme — toggled via html.light */
