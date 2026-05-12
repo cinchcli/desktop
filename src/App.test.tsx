@@ -50,21 +50,21 @@ describe('App', () => {
         });
     });
 
-    it('renders LocalOnlyView on LocalOnly variant', async () => {
+    it('renders AddRelayDialog on LocalOnly variant', async () => {
         const state: AuthState = { variant: 'LocalOnly' };
         vi.mocked(useAuthState).mockReturnValue(state);
         render(<App />);
         
         await waitFor(() => {
-            expect(screen.getByTestId('local-only-view')).toBeInTheDocument();
+            expect(screen.getByText(/Connect to relay/i)).toBeInTheDocument();
         });
         expect(screen.queryByTestId('setup-screen')).not.toBeInTheDocument();
     });
 
-    it('does NOT render LocalOnlyView on Authenticated variant', async () => {
+    it('does NOT render AddRelayDialog on Authenticated variant', async () => {
         const state: AuthState = {
             variant: 'Authenticated',
-            payload: { user_id: 'u1', device_id: 'd1', hostname: 'h', relay_url: 'http://localhost:8080', active_relay_id: 'r1' },
+            payload: { user_id: 'u1', device_id: 'd1', hostname: 'h', relay_url: 'http://localhost:8080', active_relay_id: 'r1', machine_id: 'm1' },
         };
         vi.mocked(useAuthState).mockReturnValue(state);
         render(<App />);
@@ -72,7 +72,7 @@ describe('App', () => {
         await waitFor(() => {
             expect(screen.getByTestId('dashboard-root')).toBeInTheDocument();
         });
-        expect(screen.queryByTestId('local-only-view')).not.toBeInTheDocument();
+        expect(screen.queryByText(/Connect to relay/i)).not.toBeInTheDocument();
     });
 
     it('renders AuthLoadingScreen on Authenticating variant', async () => {
@@ -105,7 +105,7 @@ describe('App', () => {
     it('focuses search when / is pressed outside text input', async () => {
         const state: AuthState = {
             variant: 'Authenticated',
-            payload: { user_id: 'u1', device_id: 'd1', hostname: 'h', relay_url: 'http://localhost:8080', active_relay_id: 'r1' },
+            payload: { user_id: 'u1', device_id: 'd1', hostname: 'h', relay_url: 'http://localhost:8080', active_relay_id: 'r1', machine_id: 'm1' },
         };
         vi.mocked(useAuthState).mockReturnValue(state);
         render(<App />);
@@ -141,7 +141,7 @@ describe('App', () => {
         });
         const state: AuthState = {
             variant: 'Authenticated',
-            payload: { user_id: 'u1', device_id: 'd1', hostname: 'h', relay_url: 'http://localhost:8080', active_relay_id: 'r1' },
+            payload: { user_id: 'u1', device_id: 'd1', hostname: 'h', relay_url: 'http://localhost:8080', active_relay_id: 'r1', machine_id: 'm1' },
         };
         vi.mocked(useAuthState).mockReturnValue(state);
         render(<App />);

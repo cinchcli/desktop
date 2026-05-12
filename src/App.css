@@ -258,7 +258,7 @@ html.light {
   .offline-pulse-dot { animation: none !important; }
 }
 
-/* ─── Loading skeleton shimmer (LocalOnlyView) ─── */
+/* ─── Loading skeleton shimmer ─── */
 @keyframes shimmer {
   from { transform: translateX(-100%); }
   to { transform: translateX(300%); }

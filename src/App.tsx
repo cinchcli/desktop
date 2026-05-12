@@ -10,7 +10,6 @@ import { applyClipFilter, type ClipFilter } from './lib/clipFilters';
 import { C } from './design';
 import { useAuthState, retryAuth, signOut, type AuthProgress, type AuthErrorReason } from './state/auth';
 import SettingsPane from './SettingsPane';
-import { LocalOnlyView } from './components/LocalOnlyView';
 import { AdoptedAuthToast } from './components/AdoptedAuthToast';
 import { OfflineQueueDroppedToast } from './components/OfflineQueueDroppedToast';
 import { ClipDecryptFailedToast } from './components/ClipDecryptFailedToast';
@@ -193,6 +192,7 @@ function App() {
       events.wsStatus.listen((e) => setStatus(e.payload)),
       events.clipReceived.listen(() => { refreshClips(); refreshSources(); }),
       events.clipDeleted.listen(() => { refreshClips(); refreshSources(); }),
+      events.clipPinned.listen(() => { refreshClips(); }),
       events.newSourceDetected.listen((e) => {
         setNewSourcePrompt(e.payload);
       }),
@@ -362,6 +362,18 @@ function App() {
         setSelectedSource(null);
         return;
       }
+      // Cmd+P — pin/unpin: prevent print dialog unconditionally, act when a clip is selected.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        if (selectedClip) {
+          if (selectedClip.is_pinned) {
+            handleUnpin(selectedClip);
+          } else {
+            setPinNoteDialog({ clip: selectedClip });
+          }
+        }
+        return;
+      }
       if (selectedClip) {
         if (e.key === 'Enter' && (!(e.target instanceof HTMLInputElement) || e.target === searchRef.current)) {
           e.preventDefault();
@@ -369,14 +381,6 @@ function App() {
         }
         if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
           if (!window.getSelection()?.toString()) copyClip(selectedClip);
-        }
-        if ((e.metaKey || e.ctrlKey) && e.key === 'p' && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
-          e.preventDefault();
-          if (selectedClip.is_pinned) {
-            handleUnpin(selectedClip);
-          } else {
-            setPinNoteDialog({ clip: selectedClip });
-          }
         }
       }
       // Ctrl+H / Ctrl+L — cycle sources (only when not typing in search)
@@ -435,17 +439,20 @@ function App() {
 
   if (auth.variant === 'LocalOnly') {
     return (
-      <>
-        <LocalOnlyView
-          theme={theme}
-          toggleTheme={toggleTheme}
-          onOpenSettings={() => setShowSettings(true)}
-        />
-        {handoffDialog}
+      <main data-testid="dashboard-root" style={S.main}>
+        {handoffRelay !== null ? (
+          <AddRelayDialog
+            onClose={() => setHandoffRelay(null)}
+            initialRelayUrl={handoffRelay}
+            fromCli
+          />
+        ) : (
+          <AddRelayDialog onClose={() => {}} hideClose />
+        )}
         <AdoptedAuthToast />
         <OfflineQueueDroppedToast />
         <ClipDecryptFailedToast />
-      </>
+      </main>
     );
   }
   if (auth.variant === 'Authenticating') {
