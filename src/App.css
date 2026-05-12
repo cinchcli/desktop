@@ -50,6 +50,7 @@
   --warning: #E8B98C;
   --error:   #FF6363;
   --info:    #B4C8E6;
+  --highlight: rgba(255, 193, 7, 0.35);
 
   /* Spacing (8px base + 12) */
   --sp-2xs: 2px;
@@ -107,6 +108,7 @@ html.light {
   --warning: #CA8A04;
   --error:   #9F2F2D;
   --info:    #2563EB;
+  --highlight: rgba(255, 193, 7, 0.4);
 
   color-scheme: light;
 }

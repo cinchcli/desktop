@@ -428,7 +428,7 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
                   <button
                     type="button"
                     onClick={() => setDisconnectOpen(true)}
-                    style={{ background: "none", border: `1px solid rgba(255,99,99,0.3)`, borderRadius: 5, color: C.error, fontSize: 11, fontWeight: 500, padding: "4px 10px", cursor: "pointer" }}
+                    style={{ background: "none", border: `1px solid color-mix(in srgb, var(--error) 30%, transparent)`, borderRadius: 5, color: C.error, fontSize: 11, fontWeight: 500, padding: "4px 10px", cursor: "pointer" }}
                   >
                     Disconnect
                   </button>
