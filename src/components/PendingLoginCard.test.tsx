@@ -75,4 +75,32 @@ describe("PendingLoginCard", () => {
         );
         expect(screen.queryByText(/us-west/)).not.toBeInTheDocument();
     });
+
+    it("shows error when approve fails and does not call onResolved", async () => {
+        const onResolved = vi.fn();
+        (commands.approveRemoteLogin as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+            status: "error",
+            error: "relay unreachable",
+        });
+        render(<PendingLoginCard {...baseProps} onResolved={onResolved} />);
+
+        fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+
+        await screen.findByText(/relay unreachable/);
+        expect(onResolved).not.toHaveBeenCalled();
+    });
+
+    it("shows error when deny fails and does not call onResolved", async () => {
+        const onResolved = vi.fn();
+        (commands.denyRemoteLogin as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+            status: "error",
+            error: "network timeout",
+        });
+        render(<PendingLoginCard {...baseProps} onResolved={onResolved} />);
+
+        fireEvent.click(screen.getByRole("button", { name: "Deny" }));
+
+        await screen.findByText(/network timeout/);
+        expect(onResolved).not.toHaveBeenCalled();
+    });
 });
