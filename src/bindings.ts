@@ -105,6 +105,23 @@ export const commands = {
 	// list_ssh_hosts — return concrete aliases from the user's ~/.ssh/config.
 	listSshHosts: () => typedError<string[], string>(__TAURI_INVOKE("list_ssh_hosts")),
 	/**
+	 *  approve_remote_login — accept a pending device-code request and clear it
+	 *  from the local pending list.
+	 * 
+	 *  Calls `POST /auth/device-code/complete` on the relay with bearer auth,
+	 *  then removes the matching entry from PendingCodesHandle.
+	 */
+	approveRemoteLogin: (userCode: string) => typedError<null, string>(__TAURI_INVOKE("approve_remote_login", { userCode })),
+	/**
+	 *  deny_remote_login — reject a pending device-code request and clear it
+	 *  from the local pending list.
+	 * 
+	 *  Calls `POST /cinch.v1.AuthService/DeviceCodeDeny` (Connect-RPC unary)
+	 *  on the relay with bearer auth, then removes the matching entry from
+	 *  PendingCodesHandle.
+	 */
+	denyRemoteLogin: (userCode: string) => typedError<null, string>(__TAURI_INVOKE("deny_remote_login", { userCode })),
+	/**
 	 *  Pair with a relay using a master token obtained from `cinch auth login`.
 	 *  Clears any existing relay and replaces it with the new one.
 	 */

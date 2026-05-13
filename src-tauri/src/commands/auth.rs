@@ -282,8 +282,10 @@ pub fn sign_in(
                     .await;
             });
 
-            let pending_codes2: crate::auth::state::PendingCodesHandle =
-                app2.state::<crate::auth::state::PendingCodesHandle>().inner().clone();
+            let pending_codes2: crate::auth::state::PendingCodesHandle = app2
+                .state::<crate::auth::state::PendingCodesHandle>()
+                .inner()
+                .clone();
             let jh = crate::ws::spawn_ws_client(
                 &app2,
                 relay2.clone(),
@@ -787,6 +789,85 @@ echo "Authenticating with relay at $RELAY_URL..."
     );
 
     s
+}
+
+// ---------------------------------------------------------------------------
+// Remote-login approval / denial commands (Task 3.4)
+// ---------------------------------------------------------------------------
+
+/// Core logic for approving a pending device-code login.
+/// Extracted so tests can drive it without a live Tauri AppHandle.
+pub(crate) async fn approve_remote_login_impl(
+    user_code: &str,
+    relay_url: &str,
+    token: &str,
+    pending: &crate::auth::state::PendingCodesHandle,
+) -> Result<(), String> {
+    let client =
+        client_core::http::RestClient::new(relay_url, token).map_err(|e| e.to_string())?;
+    client
+        .complete_device_code(user_code)
+        .await
+        .map_err(|e| e.to_string())?;
+    crate::auth::state::remove_pending_code(pending, user_code);
+    Ok(())
+}
+
+/// Core logic for denying a pending device-code login.
+/// Extracted so tests can drive it without a live Tauri AppHandle.
+pub(crate) async fn deny_remote_login_impl(
+    user_code: &str,
+    relay_url: &str,
+    token: &str,
+    pending: &crate::auth::state::PendingCodesHandle,
+) -> Result<(), String> {
+    let client =
+        client_core::http::RestClient::new(relay_url, token).map_err(|e| e.to_string())?;
+    client
+        .deny_device_code(user_code)
+        .await
+        .map_err(|e| e.to_string())?;
+    crate::auth::state::remove_pending_code(pending, user_code);
+    Ok(())
+}
+
+/// approve_remote_login — accept a pending device-code request and clear it
+/// from the local pending list.
+///
+/// Calls `POST /auth/device-code/complete` on the relay with bearer auth,
+/// then removes the matching entry from PendingCodesHandle.
+#[tauri::command]
+#[specta::specta]
+pub async fn approve_remote_login(
+    user_code: String,
+    _app: AppHandle,
+    pending: State<'_, crate::auth::state::PendingCodesHandle>,
+) -> Result<(), String> {
+    let cfg = crate::protocol::Config::load().unwrap_or_default();
+    if cfg.token.is_empty() {
+        return Err("not signed in".into());
+    }
+    approve_remote_login_impl(&user_code, &cfg.relay_url, &cfg.token, pending.inner()).await
+}
+
+/// deny_remote_login — reject a pending device-code request and clear it
+/// from the local pending list.
+///
+/// Calls `POST /cinch.v1.AuthService/DeviceCodeDeny` (Connect-RPC unary)
+/// on the relay with bearer auth, then removes the matching entry from
+/// PendingCodesHandle.
+#[tauri::command]
+#[specta::specta]
+pub async fn deny_remote_login(
+    user_code: String,
+    _app: AppHandle,
+    pending: State<'_, crate::auth::state::PendingCodesHandle>,
+) -> Result<(), String> {
+    let cfg = crate::protocol::Config::load().unwrap_or_default();
+    if cfg.token.is_empty() {
+        return Err("not signed in".into());
+    }
+    deny_remote_login_impl(&user_code, &cfg.relay_url, &cfg.token, pending.inner()).await
 }
 
 #[cfg(test)]
