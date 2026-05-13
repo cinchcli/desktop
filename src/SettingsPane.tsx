@@ -7,8 +7,8 @@
 
 import { useEffect, useId, useState, type CSSProperties } from "react";
 import { register, unregister, isRegistered } from "@tauri-apps/plugin-global-shortcut";
-import { commands } from "./bindings";
-import type { RetentionConfig } from "./bindings";
+import { commands, events } from "./bindings";
+import type { RetentionConfig, PendingDeviceCode } from "./bindings";
 import { unwrap } from "./lib/tauri";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
@@ -19,6 +19,8 @@ import RetentionSlider from "./RetentionSlider";
 import { AddRelayDialog } from "./components/AddRelayDialog";
 import { MachinesPanel } from "./components/MachinesPanel";
 import { useAuthState, signOut } from "./lib/state/auth";
+import { PendingLoginCard } from "./components/PendingLoginCard";
+import { ManualApproveForm } from "./components/ManualApproveForm";
 
 const WINDOW_PRESETS = {
   compact:  { label: "Compact",  width: 760,  height: 480 },
@@ -67,7 +69,8 @@ async function registerWindowShortcut(shortcut: string): Promise<void> {
 export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) {
   const titleId = useId();
   const auth = useAuthState();
-  const [activeTab, setActiveTab] = useState<"general" | "shortcuts" | "servers">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "shortcuts" | "servers" | "sessions">("general");
+  const [pending, setPending] = useState<PendingDeviceCode[]>([]);
   const [addRelayOpen, setAddRelayOpen] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [state, setState] = useState<LoadState>({ kind: "loading" });
@@ -94,6 +97,29 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
   const [shortcutInput, setShortcutInput] = useState<string>("\u2318\u21E7W");
   const [shortcutError, setShortcutError] = useState<string | null>(null);
   const [shortcutSaving, setShortcutSaving] = useState(false);
+
+  // Subscribe to device_code_pending events while the pane is mounted.
+  // Pending events fired while the pane is closed are surfaced via the tray
+  // badge and macOS notification (Task 3.5 / 3.7); this covers the in-app
+  // review surface.
+  useEffect(() => {
+    let unsub: (() => void) | null = null;
+    let cancelled = false;
+    (async () => {
+      unsub = await events.deviceCodePending.listen((e) => {
+        setPending((prev) =>
+          prev.find((p) => p.user_code === e.payload.user_code)
+            ? prev
+            : [...prev, e.payload],
+        );
+      });
+      if (cancelled) unsub?.();
+    })();
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
+  }, []);
 
   // Load persisted global shortcut on mount.
   useEffect(() => {
@@ -380,7 +406,7 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
       <div style={styles.pane}>
         {/* Tab bar */}
         <div style={{ display: "flex", gap: 4, marginBottom: 24, borderBottom: `1px solid ${C.border}`, paddingBottom: 0 }}>
-          {(["general", "shortcuts", "servers"] as const).map((tab) => (
+          {(["general", "shortcuts", "servers", "sessions"] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -403,6 +429,40 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
             </button>
           ))}
         </div>
+
+        {/* Sessions tab */}
+        {activeTab === "sessions" && (
+          <section>
+            <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: "-0.012em", color: C.t1, marginBottom: 4 }}>
+              Pending login requests
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 500, color: C.t3, marginBottom: 16 }}>
+              Approve or deny sign-in requests from other machines running{" "}
+              <code style={{ fontFamily: "var(--font-mono)" }}>cinch auth login</code>.
+            </div>
+            {pending.length > 0 ? (
+              pending.map((p) => (
+                <PendingLoginCard
+                  key={p.user_code}
+                  userCode={p.user_code}
+                  hostname={p.hostname}
+                  sourceRegion={p.source_region}
+                  requestedAt={p.requested_at}
+                  onResolved={() =>
+                    setPending((prev) =>
+                      prev.filter((x) => x.user_code !== p.user_code),
+                    )
+                  }
+                />
+              ))
+            ) : (
+              <div style={{ fontSize: 13, fontWeight: 500, color: C.t3, padding: "12px 0" }}>
+                No pending login requests.
+              </div>
+            )}
+            <ManualApproveForm onApproved={() => { /* list is already current; no refresh needed */ }} />
+          </section>
+        )}
 
         {/* Servers tab */}
         {activeTab === "servers" && (

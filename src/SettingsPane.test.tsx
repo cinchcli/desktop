@@ -20,6 +20,14 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invoke(...args),
 }));
 
+// Mock @tauri-apps/api/event (required now that SettingsPane subscribes to
+// events.deviceCodePending on mount)
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(() => Promise.resolve(() => {})),
+  once: vi.fn(() => Promise.resolve(() => {})),
+  emit: vi.fn(() => Promise.resolve()),
+}));
+
 // Mock @tauri-apps/plugin-global-shortcut
 const mockRegister = vi.fn(() => Promise.resolve());
 const mockUnregister = vi.fn(() => Promise.resolve());
