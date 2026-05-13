@@ -66,6 +66,8 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::auth::handle_deeplink,
             commands::auth::pair_via_ssh,
             commands::auth::list_ssh_hosts,
+            commands::auth::approve_remote_login,
+            commands::auth::deny_remote_login,
             commands::relays::pair_with_token,
         ])
         .events(collect_events![
