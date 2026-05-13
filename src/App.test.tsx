@@ -155,4 +155,48 @@ describe('App', () => {
         await waitFor(() => expect(input).toHaveValue(''));
         expect(invoke).toHaveBeenCalledWith('mark_clip_copied', { id: 'c1' });
     });
+
+    it('does not copy and hide the window when confirming a pin note with Enter', async () => {
+        const clip: LocalClip = {
+            id: 'c1',
+            user_id: 'u1',
+            content: 'clip to pin',
+            content_type: 'text',
+            source: 'local',
+            label: '',
+            byte_size: 11,
+            media_path: null,
+            created_at: 1_777_614_529,
+            synced: true,
+            is_pinned: false,
+            pin_note: null,
+            received_at: 1_777_614_529,
+        };
+        vi.mocked(invoke).mockImplementation((cmd) => {
+            if (cmd === 'list_clips') return Promise.resolve([clip]);
+            if (cmd === 'list_pinned_clips' || cmd === 'get_sources' || cmd === 'list_devices') return Promise.resolve([]);
+            if (cmd === 'get_ws_status') return Promise.resolve('connected');
+            return Promise.resolve();
+        });
+        const state: AuthState = {
+            variant: 'Authenticated',
+            payload: { user_id: 'u1', device_id: 'd1', hostname: 'h', relay_url: 'http://localhost:8080', active_relay_id: 'r1', machine_id: 'm1' },
+        };
+        vi.mocked(useAuthState).mockReturnValue(state);
+        render(<App />);
+
+        const row = await screen.findByRole('button', { name: /clip to pin/i });
+        fireEvent.click(row);
+        fireEvent.keyDown(window, { key: 'p', metaKey: true });
+
+        const note = await screen.findByPlaceholderText('Add a note (optional)');
+        fireEvent.change(note, { target: { value: 'important' } });
+        fireEvent.keyDown(note, { key: 'Enter' });
+
+        await waitFor(() => {
+            expect(invoke).toHaveBeenCalledWith('pin_clip', { id: 'c1', note: 'important' });
+        });
+        expect(invoke).not.toHaveBeenCalledWith('copy_clip_to_clipboard', { content: 'clip to pin' });
+        expect(invoke).not.toHaveBeenCalledWith('focus_previous_app');
+    });
 });
