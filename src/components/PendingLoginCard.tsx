@@ -26,6 +26,7 @@ export function PendingLoginCard({
     const [approveHovered, setApproveHovered] = useState(false);
     const [denyHovered, setDenyHovered] = useState(false);
     const [busy, setBusy] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
     const age = secondsAgo(requestedAt);
 
@@ -66,15 +67,33 @@ export function PendingLoginCard({
     async function handleApprove() {
         if (busy) return;
         setBusy(true);
-        await commands.approveRemoteLogin(userCode);
-        onResolved();
+        setError(null);
+        try {
+            const r = await commands.approveRemoteLogin(userCode);
+            if (r.status === "ok") {
+                onResolved();
+            } else {
+                setError(r.error);
+            }
+        } finally {
+            setBusy(false);
+        }
     }
 
     async function handleDeny() {
         if (busy) return;
         setBusy(true);
-        await commands.denyRemoteLogin(userCode);
-        onResolved();
+        setError(null);
+        try {
+            const r = await commands.denyRemoteLogin(userCode);
+            if (r.status === "ok") {
+                onResolved();
+            } else {
+                setError(r.error);
+            }
+        } finally {
+            setBusy(false);
+        }
     }
 
     return (
@@ -108,6 +127,11 @@ export function PendingLoginCard({
                     Deny
                 </button>
             </div>
+            {error && (
+                <div style={{ fontSize: 11, color: C.error, marginTop: 6 }}>
+                    {error}
+                </div>
+            )}
         </div>
     );
 }
