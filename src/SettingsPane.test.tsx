@@ -175,4 +175,48 @@ describe("SettingsPane", () => {
       expect(screen.queryByRole("button", { name: "Save filter rules" })).not.toBeInTheDocument();
     });
   });
+
+  describe("Notifications toggle", () => {
+    it("shows the remote login notification checkbox in the General tab, checked by default", async () => {
+      localStorage.removeItem("cinch.notify_on_remote_login");
+      render(<SettingsPane onClose={() => {}} clipCount={0} />);
+
+      await screen.findByText("Local retention");
+
+      const checkbox = screen.getByLabelText(
+        /remote login is pending approval/i
+      ) as HTMLInputElement;
+      expect(checkbox).toBeInTheDocument();
+      expect(checkbox.checked).toBe(true);
+    });
+
+    it("toggles the notification setting and persists to localStorage", async () => {
+      localStorage.setItem("cinch.notify_on_remote_login", "1");
+      render(<SettingsPane onClose={() => {}} clipCount={0} />);
+
+      await screen.findByText("Local retention");
+
+      const checkbox = screen.getByLabelText(
+        /remote login is pending approval/i
+      ) as HTMLInputElement;
+      expect(checkbox.checked).toBe(true);
+
+      fireEvent.click(checkbox);
+
+      expect(checkbox.checked).toBe(false);
+      expect(localStorage.getItem("cinch.notify_on_remote_login")).toBe("0");
+    });
+
+    it("reads an existing false value from localStorage on mount", async () => {
+      localStorage.setItem("cinch.notify_on_remote_login", "0");
+      render(<SettingsPane onClose={() => {}} clipCount={0} />);
+
+      await screen.findByText("Local retention");
+
+      const checkbox = screen.getByLabelText(
+        /remote login is pending approval/i
+      ) as HTMLInputElement;
+      expect(checkbox.checked).toBe(false);
+    });
+  });
 });

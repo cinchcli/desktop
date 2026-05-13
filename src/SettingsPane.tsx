@@ -19,6 +19,7 @@ import RetentionSlider from "./RetentionSlider";
 import { AddRelayDialog } from "./components/AddRelayDialog";
 import { MachinesPanel } from "./components/MachinesPanel";
 import { useAuthState, signOut } from "./lib/state/auth";
+import { useNotifyOnRemoteLogin } from "./lib/settings";
 import { PendingLoginCard } from "./components/PendingLoginCard";
 import { ManualApproveForm } from "./components/ManualApproveForm";
 
@@ -84,6 +85,7 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
   const [destructiveHovered, setDestructiveHovered] = useState(false);
 
   const [windowPreset, setWindowPreset] = useState<WindowPreset>(resolveWindowPreset);
+  const [notifyOnRemoteLogin, setNotifyOnRemoteLogin] = useNotifyOnRemoteLogin();
 
   async function applyWindowPreset(preset: WindowPreset) {
     const { width, height } = WINDOW_PRESETS[preset];
@@ -745,6 +747,26 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
                   );
                 })}
               </div>
+            </div>
+
+            <hr style={styles.sectionDivider} />
+
+            <div style={styles.section}>
+              <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.012em', color: C.t1, marginBottom: 4 }}>
+                Notifications
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 500, color: C.t3, marginBottom: 12 }}>
+                Control which system notifications cinch shows.
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, fontWeight: 500, color: C.t2 }}>
+                <input
+                  type="checkbox"
+                  checked={notifyOnRemoteLogin}
+                  onChange={(e) => setNotifyOnRemoteLogin(e.target.checked)}
+                  aria-label="Show macOS notification when a remote login is pending approval"
+                />
+                Show macOS notification when a remote login is pending approval
+              </label>
             </div>
 
             {saveError && <div style={styles.errorRegion}>{saveError}</div>}
