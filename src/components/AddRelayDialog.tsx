@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { commands } from "../bindings";
 import { unwrap } from "../lib/tauri";
-import { signIn } from "../state/auth";
+import { signIn } from "../lib/state/auth";
 import { C } from "../design";
 import { IconX } from "../icons";
 

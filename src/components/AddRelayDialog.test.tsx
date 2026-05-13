@@ -3,9 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AddRelayDialog } from "./AddRelayDialog";
-import { signIn } from "../state/auth";
+import { signIn } from "../lib/state/auth";
 
-vi.mock("../state/auth", () => ({
+vi.mock("../lib/state/auth", () => ({
   signIn: vi.fn(),
 }));
 

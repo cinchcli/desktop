@@ -18,7 +18,7 @@ import ConfirmDialog from "./ConfirmDialog";
 import RetentionSlider from "./RetentionSlider";
 import { AddRelayDialog } from "./components/AddRelayDialog";
 import { MachinesPanel } from "./components/MachinesPanel";
-import { useAuthState, signOut } from "./state/auth";
+import { useAuthState, signOut } from "./lib/state/auth";
 
 const WINDOW_PRESETS = {
   compact:  { label: "Compact",  width: 760,  height: 480 },

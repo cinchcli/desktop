@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { invoke } from '@tauri-apps/api/core';
 import App from './App';
-import { useAuthState, type AuthState } from './state/auth';
+import { useAuthState, type AuthState } from './lib/state/auth';
 import type { LocalClip } from './bindings';
 
 // Mock the auth module: AuthProvider becomes a pass-through; useAuthState is type-safely mocked.
-vi.mock('./state/auth', () => ({
+vi.mock('./lib/state/auth', () => ({
     AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     useAuthState: vi.fn(),
     signIn: vi.fn(),
