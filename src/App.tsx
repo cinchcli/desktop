@@ -8,7 +8,7 @@ import { buildTargets, fuzzySearch, parseFromToken } from './lib/fuzzy';
 import { groupByTimeBucket } from './lib/timeBuckets';
 import { applyClipFilter, type ClipFilter } from './lib/clipFilters';
 import { C } from './design';
-import { useAuthState, retryAuth, signOut, type AuthProgress, type AuthErrorReason } from './state/auth';
+import { useAuthState, retryAuth, signOut, type AuthProgress, type AuthErrorReason } from './lib/state/auth';
 import SettingsPane from './SettingsPane';
 import { AdoptedAuthToast } from './components/AdoptedAuthToast';
 import { OfflineQueueDroppedToast } from './components/OfflineQueueDroppedToast';

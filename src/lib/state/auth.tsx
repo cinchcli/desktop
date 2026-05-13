@@ -6,8 +6,8 @@
 // so JSON looks like: { "variant": "Authenticated", "payload": { user_id, device_id, ... } }.
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { commands, events } from '../bindings';
-import { unwrap } from '../lib/tauri';
+import { commands, events } from '../../bindings';
+import { unwrap } from '../tauri';
 import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 
 export type AuthProgress =
