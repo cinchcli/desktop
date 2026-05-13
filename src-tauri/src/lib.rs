@@ -609,6 +609,10 @@ pub(crate) fn show_on_active_monitor(app: &tauri::AppHandle) {
     }
 
     let _ = window.show();
+    // Promote the whole app above other apps before focusing the window —
+    // `set_focus` alone only reorders within the active app on macOS.
+    #[cfg(target_os = "macos")]
+    activate_self();
     let _ = window.set_focus();
 }
 
@@ -653,6 +657,28 @@ pub(crate) fn activate_app_by_pid(pid: i32) {
     unsafe {
         let app: *mut Object =
             msg_send![class!(NSRunningApplication), runningApplicationWithProcessIdentifier: pid];
+        if app.is_null() {
+            return;
+        }
+        // NSApplicationActivateIgnoringOtherApps = 2
+        let _: bool = msg_send![app, activateWithOptions: 2u64];
+    }
+}
+
+/// Brings the current process to the front on macOS.
+///
+/// `NSWindow.makeKeyAndOrderFront:` (what Tauri's `set_focus` calls) only reorders
+/// windows *within* the active application. If another app is frontmost when the
+/// global shortcut fires, the Cinch window appears layered between that app's
+/// windows instead of on top of everything. Activating the running application
+/// itself promotes Cinch above all other apps in the global window order.
+#[cfg(target_os = "macos")]
+fn activate_self() {
+    use objc::runtime::Object;
+    use objc::{class, msg_send, sel, sel_impl};
+
+    unsafe {
+        let app: *mut Object = msg_send![class!(NSRunningApplication), currentApplication];
         if app.is_null() {
             return;
         }
