@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import type { LocalClip } from '../bindings';
 import { C, formatBytes } from '../design';
 import { parseFromToken } from '../lib/fuzzy';
+import type { MachineTagColorMap } from '../lib/machineTagColors';
 import { SourcePill } from './SourcePill';
 
 interface ClipDetailProps {
@@ -11,14 +12,29 @@ interface ClipDetailProps {
   onPin: (clip: LocalClip) => void;
   onDelete: (clip: LocalClip) => void;
   searchQuery?: string;
+  tagColors?: MachineTagColorMap;
+  sourceDisplayNames?: Record<string, string>;
 }
 
-export function ClipDetail({ clip, onCopy, onPin, onDelete, searchQuery }: ClipDetailProps) {
+export function ClipDetail({
+  clip,
+  onCopy,
+  onPin,
+  onDelete,
+  searchQuery,
+  tagColors = {},
+  sourceDisplayNames = {},
+}: ClipDetailProps) {
   const [imgDims, setImgDims] = useState<{ w: number; h: number } | null>(null);
   useEffect(() => { setImgDims(null); }, [clip?.id]);
 
   if (!clip) {
-    return <div style={S.placeholder}>Select a clip</div>;
+    return (
+      <div style={S.placeholder}>
+        <span style={S.placeholderTitle}>Select a clip</span>
+        <span style={S.placeholderHint}>↵ copy · ⌘P pin · ⌘⌫ delete</span>
+      </div>
+    );
   }
 
   const isImage = clip.content_type === 'image' && !!clip.media_path;
@@ -41,7 +57,12 @@ export function ClipDetail({ clip, onCopy, onPin, onDelete, searchQuery }: ClipD
     <div style={S.col}>
       <div style={S.header}>
         <div style={S.stamp}>
-          <SourcePill source={clip.source} status={clip.source === 'local' ? 'local' : 'remote'} />
+          <SourcePill
+            source={clip.source}
+            status={clip.source === 'local' ? 'local' : 'remote'}
+            nickname={sourceDisplayNames[clip.source]}
+            colorSlot={tagColors[clip.source]}
+          />
           <span style={{ color: C.t4 }}>·</span>
           <span>{stamp}</span>
         </div>
@@ -71,15 +92,16 @@ export function ClipDetail({ clip, onCopy, onPin, onDelete, searchQuery }: ClipD
 
       <div style={S.footer}>
         <div style={S.actions}>
-          <button type="button" onClick={() => onCopy(clip)} style={S.btnPrimary}>
+          <button type="button" onClick={() => onCopy(clip)} className="btn-primary" style={S.btnPrimary}>
             Copy <span style={S.kbdHint}>↵</span>
           </button>
-          <button type="button" onClick={() => onPin(clip)} style={S.btnGhost}>
+          <button type="button" onClick={() => onPin(clip)} className="btn-ghost" style={S.btnGhost}>
             {clip.is_pinned ? 'Unpin' : 'Pin'} <span style={S.kbdHint}>⌘P</span>
           </button>
           <button
             type="button"
             onClick={() => onDelete(clip)}
+            className="btn-ghost"
             style={{ ...S.btnGhost, marginLeft: 'auto' }}
           >
             Delete <span style={S.kbdHint}>⌘⌫</span>
@@ -125,12 +147,22 @@ const S: Record<string, CSSProperties> = {
   placeholder: {
     flex: 1,
     display: 'flex',
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    color: C.t3,
+    gap: 6,
+  },
+  placeholderTitle: {
     fontSize: 13,
     fontWeight: 500,
     letterSpacing: '-0.005em',
+    color: C.t3,
+  },
+  placeholderHint: {
+    fontSize: 10,
+    fontFamily: 'var(--font-mono)',
+    letterSpacing: '0.04em',
+    color: C.t4,
   },
   col: {
     flex: 1,
@@ -168,8 +200,7 @@ const S: Record<string, CSSProperties> = {
     gap: 8,
     fontSize: 10,
     fontFamily: 'var(--font-mono)',
-    letterSpacing: '0.08em',
-    textTransform: 'uppercase',
+    letterSpacing: '0.02em',
     color: C.t3,
   },
   code: {
@@ -258,8 +289,7 @@ const S: Record<string, CSSProperties> = {
   },
   metaKey: {
     color: C.t3,
-    letterSpacing: '0.06em',
-    textTransform: 'uppercase',
+    letterSpacing: '0.01em',
     margin: 0,
   },
   metaVal: { color: C.t1, margin: 0, wordBreak: 'break-all' },

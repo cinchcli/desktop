@@ -24,6 +24,7 @@ function RailItem({ label, active, onClick, children }: RailItemProps) {
       title={label}
       aria-current={active ? 'page' : undefined}
       onClick={onClick}
+      className="rail-btn"
       style={{
         ...S.ic,
         ...(active ? S.icActive : {}),

@@ -1,8 +1,25 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useId } from 'react';
 import { commands } from '../bindings';
 import { unwrap } from '../lib/tauri';
 import { C, formatTime } from '../design';
-import { sourcePillVars } from '../lib/sourceColor';
+import {
+  SOURCE_COLOR_OPTIONS,
+  sourceColorSlotVars,
+  sourcePillVars,
+  type SourceColorSlot,
+} from '../lib/sourceColor';
+import {
+  loadMachineTagColors,
+  MACHINE_TAG_COLORS_EVENT,
+  setMachineTagColor,
+  type MachineTagColorMap,
+} from '../lib/machineTagColors';
+import {
+  loadMachineDisplayNames,
+  MACHINE_DISPLAY_NAMES_EVENT,
+  setMachineDisplayName,
+  type MachineDisplayNameMap,
+} from '../lib/machineDisplayNames';
 import type { Device, SourceAlertSetting, SourceInfo } from '../bindings';
 import ConfirmDialog from '../ConfirmDialog';
 import { CleanupDialog } from './CleanupDialog';
@@ -39,10 +56,13 @@ export function MachinesPanel({
   const [devices, setDevices] = useState<Device[]>([]);
   const [sources, setSources] = useState<SourceInfo[]>([]);
   const [alertSettings, setAlertSettings] = useState<Record<string, boolean>>({});
+  const [tagColors, setTagColors] = useState<MachineTagColorMap>(() => loadMachineTagColors());
+  const [displayNames, setDisplayNames] = useState<MachineDisplayNameMap>(() => loadMachineDisplayNames());
   const [loading, setLoading] = useState(true);
-  const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null);
+  const [editingSource, setEditingSource] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [savingNickname, setSavingNickname] = useState(false);
+  const [openSettingsSource, setOpenSettingsSource] = useState<string | null>(null);
   const [confirmingRevokeId, setConfirmingRevokeId] = useState<string | null>(
     null,
   );
@@ -78,6 +98,26 @@ export function MachinesPanel({
     const id = setInterval(fetchAll, 5000);
     return () => clearInterval(id);
   }, [fetchAll]);
+
+  useEffect(() => {
+    const handleColorChange = () => setTagColors(loadMachineTagColors());
+    window.addEventListener(MACHINE_TAG_COLORS_EVENT, handleColorChange);
+    window.addEventListener('storage', handleColorChange);
+    return () => {
+      window.removeEventListener(MACHINE_TAG_COLORS_EVENT, handleColorChange);
+      window.removeEventListener('storage', handleColorChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleDisplayNameChange = () => setDisplayNames(loadMachineDisplayNames());
+    window.addEventListener(MACHINE_DISPLAY_NAMES_EVENT, handleDisplayNameChange);
+    window.addEventListener('storage', handleDisplayNameChange);
+    return () => {
+      window.removeEventListener(MACHINE_DISPLAY_NAMES_EVENT, handleDisplayNameChange);
+      window.removeEventListener('storage', handleDisplayNameChange);
+    };
+  }, []);
 
   // ── Merge devices + sources ─────────────────────────────
   // Produce a combined list: paired devices first, then source-only
@@ -118,13 +158,16 @@ export function MachinesPanel({
 
   // ── Nickname save ───────────────────────────────────────
 
-  const saveNickname = useCallback(
-    async (deviceId: string, nickname: string) => {
+  const saveDisplayName = useCallback(
+    async (source: string, deviceId: string | undefined, nickname: string) => {
       setSavingNickname(true);
+      setDisplayNames(setMachineDisplayName(source, nickname));
       try {
-        await unwrap(commands.setDeviceNickname(deviceId, nickname));
-        await fetchAll();
-        onDeviceChange?.();
+        if (deviceId) {
+          await unwrap(commands.setDeviceNickname(deviceId, nickname));
+          await fetchAll();
+          onDeviceChange?.();
+        }
       } catch (_e) {
         setNicknameError('Save failed — try again');
         if (nicknameErrorTimer.current)
@@ -135,7 +178,7 @@ export function MachinesPanel({
         );
       } finally {
         setSavingNickname(false);
-        setEditingDeviceId(null);
+        setEditingSource(null);
       }
     },
     [fetchAll, onDeviceChange],
@@ -181,39 +224,49 @@ export function MachinesPanel({
     [isAlertEnabled, onShowToast],
   );
 
+  const chooseTagColor = useCallback((source: string, color: SourceColorSlot | null) => {
+    setTagColors(setMachineTagColor(source, color));
+  }, []);
+
   // ── Nickname edit interaction ───────────────────────────
 
-  const startEdit = useCallback((device: Device) => {
-    setEditingDeviceId(device.id ?? null);
-    setEditValue(device.nickname || '');
-    setNicknameError(null);
+  const toggleSettings = useCallback((source: string, displayName: string) => {
+    setOpenSettingsSource((current) => {
+      const next = current === source ? null : source;
+      if (next) {
+        setEditingSource(source);
+        setEditValue(displayName);
+        setNicknameError(null);
+      }
+      return next;
+    });
   }, []);
 
   const cancelEdit = useCallback(() => {
-    setEditingDeviceId(null);
+    setEditingSource(null);
     setEditValue('');
     setNicknameError(null);
   }, []);
 
   const commitEdit = useCallback(
-    (deviceId: string) => {
+    (source: string, deviceId?: string) => {
       const trimmed = editValue.trim();
       if (trimmed) {
-        saveNickname(deviceId, trimmed);
+        saveDisplayName(source, deviceId, trimmed);
       } else {
         cancelEdit();
       }
     },
-    [editValue, saveNickname, cancelEdit],
+    [editValue, saveDisplayName, cancelEdit],
   );
 
   // Focus input when editing starts
   useEffect(() => {
-    if (editingDeviceId && editInputRef.current) {
+    if (editingSource && editInputRef.current) {
       editInputRef.current.focus();
       editInputRef.current.select();
     }
-  }, [editingDeviceId]);
+  }, [editingSource]);
 
   // Esc/Enter on revoke confirm dialog (keyboard accessibility)
   useEffect(() => {
@@ -237,47 +290,54 @@ export function MachinesPanel({
   if (loading) {
     return (
       <div style={S.panel}>
-        <div style={S.header}>
-          <span style={S.headerTitle}>MACHINES</span>
-        </div>
-        <div role="list" aria-label="Machines loading">
+        <header style={S.toolbar}>
+          <div style={S.titleBlock}>
+            <div className="skeleton-shimmer" style={S.skeletonBlockTitle} />
+            <div className="skeleton-shimmer" style={S.skeletonBlockSubtitle} />
+          </div>
+        </header>
+        <ul aria-label="Machines loading" style={{ ...S.list, listStyle: 'none', margin: 0, padding: 0 }}>
           {[0, 1, 2].map((i) => (
-            <div key={i} role="listitem" style={S.skeletonRow}>
+            <li key={i} style={{ ...S.rowWrap, listStyle: 'none' }}>
+              <div style={S.skeletonRow}>
+                <div style={S.skeletonRowMain}>
+                <div
+                  className="skeleton-shimmer"
+                  style={{
+                    ...S.skeletonBlock,
+                    width: 10,
+                    height: 10,
+                    borderRadius: '50%',
+                  }}
+                />
+                <div
+                  className="skeleton-shimmer"
+                  style={{
+                    ...S.skeletonBlock,
+                    flex: 1,
+                    maxWidth: 280,
+                    height: 14,
+                    borderRadius: 4,
+                  }}
+                />
+              </div>
               <div
+                className="skeleton-shimmer"
                 style={{
                   ...S.skeletonBlock,
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                }}
-              />
-              <div
-                style={{
-                  ...S.skeletonBlock,
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                }}
-              />
-              <div
-                style={{
-                  ...S.skeletonBlock,
-                  flex: 1,
-                  height: 14,
+                  width: 120,
+                  height: 12,
                   borderRadius: 4,
                 }}
               />
-              <div
-                style={{
-                  ...S.skeletonBlock,
-                  width: 32,
-                  height: 14,
-                  borderRadius: 4,
-                }}
-              />
-            </div>
+                <div style={S.skeletonActions}>
+                  <div className="skeleton-shimmer" style={{ ...S.skeletonBlock, width: 72, height: 28, borderRadius: 6 }} />
+                  <div className="skeleton-shimmer" style={{ ...S.skeletonBlock, width: 72, height: 28, borderRadius: 6 }} />
+                </div>
+              </div>
+            </li>
           ))}
-        </div>
+        </ul>
       </div>
     );
   }
@@ -287,16 +347,43 @@ export function MachinesPanel({
   if (merged.length === 0) {
     return (
       <div style={S.panel}>
-        <div style={S.header}>
-          <span style={S.headerTitle}>MACHINES</span>
-          <span style={S.headerCount}>0 machines</span>
-        </div>
-        <div style={S.emptyState}>
-          <div style={S.emptyHeading}>No machines yet</div>
-          <div style={S.emptyBody}>
-            Pair a device to route clips between machines.
+        <header style={S.toolbar}>
+          <div style={S.titleBlock}>
+            <h1 style={S.pageTitle}>Machines</h1>
+            <p style={S.pageSubtitle}>
+              Paired devices and remote sources that send clips to this desk.
+            </p>
           </div>
-          <code style={S.emptyCode}>cinch auth pair</code>
+          <div style={S.toolbarAside}>
+            <span style={S.statPillMuted}>0 connected</span>
+          </div>
+        </header>
+        <div style={S.emptyState}>
+          <div style={S.emptyCard}>
+            <div style={S.emptyKicker}>Getting started</div>
+            <div style={S.emptyHeading}>No machines yet</div>
+            <div style={S.emptyBody}>
+              Pair a device so clips can sync between your machines.
+            </div>
+            <code style={S.emptyCode}>cinch auth pair</code>
+            <button
+              type="button"
+              className="btn-primary"
+              style={S.emptyPrimaryBtn}
+              onClick={() => setShowSshDialog(true)}
+            >
+              Add via SSH
+            </button>
+          </div>
+          {showSshDialog && (
+            <AddSshMachineDialog
+              onClose={() => {
+                setShowSshDialog(false);
+                fetchAll();
+              }}
+              onShowToast={onShowToast}
+            />
+          )}
         </div>
       </div>
     );
@@ -319,79 +406,146 @@ export function MachinesPanel({
 
   return (
     <div style={S.panel}>
-      <div style={S.header}>
-        <span style={S.headerTitle}>MACHINES</span>
-        <span style={S.headerCount}>
-          {pairedCount} paired · {totalCount} total
-        </span>
-      </div>
+      <header style={S.toolbar}>
+        <div style={S.titleBlock}>
+          <h1 style={S.pageTitle}>Machines</h1>
+          <p style={S.pageSubtitle}>
+            {pairedCount} paired · {totalCount} total · manage alerts and display names
+          </p>
+        </div>
+        <div style={S.toolbarAside}>
+          <span style={S.statPill}>
+            <span style={S.statStrong}>{pairedCount}</span> paired
+          </span>
+          <span style={S.statPillMuted}>
+            <span style={S.statStrong}>{totalCount}</span> in list
+          </span>
+          <button
+            type="button"
+            className="btn-primary"
+            style={S.toolbarPrimary}
+            onClick={() => setShowSshDialog(true)}
+            aria-label="Add machine via SSH"
+          >
+            Add via SSH
+          </button>
+        </div>
+      </header>
 
-      <div role="list" aria-label="Machines" style={S.grid}>
+      <ul aria-label="Machines" style={{ ...S.list, listStyle: 'none', margin: 0, padding: 0 }}>
         {merged.map((entry) => {
           if (entry.kind === 'local') {
             return (
-              <div key="local" role="listitem" style={S.card}>
-                <div style={S.cardHeader}>
-                  <span
-                    style={{
-                      ...S.statusPill,
-                      background: 'var(--surface-2)',
-                      color: 'var(--text-primary)',
-                    }}
-                    aria-label="Online"
-                  >
-                    online
-                  </span>
-                  <span style={S.thisDeviceBadge}>This device</span>
+              <li key="local" style={{ ...S.rowWrap, listStyle: 'none' }}>
+                <div style={{ ...S.row, ...S.rowCurrent }}>
+                  <div style={S.rowAccent} aria-hidden />
+                  <div style={S.rowMain}>
+                    <div style={S.rowTop}>
+                      <span
+                        style={{
+                          ...S.statusPill,
+                          background: 'var(--surface-2)',
+                          color: 'var(--text-primary)',
+                        }}
+                        role="status"
+                        aria-label="Online"
+                      >
+                        online
+                      </span>
+                      <span style={S.thisDeviceBadge}>This device</span>
+                    </div>
+                    <div style={S.cardName}>This machine</div>
+                    <div style={S.cardMeta}>Local clipboard · this Cinch instance</div>
+                  </div>
                 </div>
-                <div style={S.cardName}>This machine</div>
-                <div style={S.cardMeta}>local clips</div>
-              </div>
+              </li>
             );
           }
 
           if (entry.kind === 'source_only') {
             const s = entry.source;
-            const name = s.source.replace(/^remote:/, '');
-            const pillVars = sourcePillVars(s.source);
+            const sourceLabel = s.source.replace(/^remote:/, '');
+            const displayName = displayNames[s.source] ?? sourceLabel;
+            const colorSlot = tagColors[s.source];
+            const pillVars = sourcePillVars(s.source, colorSlot);
+            const settingsOpen = openSettingsSource === s.source;
             return (
-              <div key={s.source} role="listitem" style={S.card}>
-                <div style={S.cardHeader}>
-                  <span
+              <li key={s.source} style={{ ...S.rowWrap, listStyle: 'none' }}>
+                <div style={S.row}>
+                  <div
                     style={{
-                      ...S.statusPill,
-                      background: 'var(--surface-2)',
-                      color: C.t3,
-                    }}
-                    aria-label="Unknown status"
-                  >
-                    offline
-                  </span>
-                  <span
-                    style={{
-                      ...S.sourcePill,
+                      ...S.rowAccent,
                       background: pillVars.bg,
-                      color: pillVars.fg,
+                      opacity: 0.85,
                     }}
-                  >
-                    {name}
-                  </span>
-                </div>
-                <div style={S.cardName}>{name}</div>
-                <div style={S.cardMeta}>
-                  {s.clip_count} clips · {formatTime(s.last_seen)}
-                </div>
-                <div style={S.cardFooter}>
-                  <AlertToggle
-                    enabled={isAlertEnabled(s.source)}
-                    name={name}
-                    onClick={() => toggleAlert(s.source, name)}
+                    aria-hidden
                   />
-                  <span style={{ ...S.thisDeviceBadge, color: C.t4 }}>
-                    Not paired
-                  </span>
+                  <div style={S.rowMain}>
+                    <div style={S.rowTop}>
+                      <span
+                        style={{
+                          ...S.statusPill,
+                          background: 'var(--surface-2)',
+                          color: C.t3,
+                        }}
+                        role="status"
+                        aria-label="Unknown status"
+                      >
+                        offline
+                      </span>
+                      <span
+                        style={{
+                          ...S.sourcePill,
+                          background: pillVars.bg,
+                          color: pillVars.fg,
+                        }}
+                      >
+                        {sourceLabel}
+                      </span>
+                      <span style={{ ...S.thisDeviceBadge, color: C.t4 }}>
+                        Not paired
+                      </span>
+                    </div>
+                    <div style={S.cardName}>{displayName}</div>
+                    <div style={S.cardMeta}>
+                      {s.clip_count} clips · last seen {formatTime(s.last_seen)}
+                    </div>
+                  </div>
+                  <div style={S.rowActions}>
+                    <button
+                      type="button"
+                      className="machines-btn"
+                      style={S.customizeBtn}
+                      onClick={() => toggleSettings(s.source, displayName)}
+                      aria-expanded={settingsOpen}
+                      aria-label={`Customize ${displayName}`}
+                    >
+                      Customize
+                    </button>
+                    <AlertToggle
+                      enabled={isAlertEnabled(s.source)}
+                      name={displayName}
+                      onClick={() => toggleAlert(s.source, displayName)}
+                    />
+                  </div>
                 </div>
-              </div>
+                {settingsOpen && (
+                  <MachineSettingsPanel
+                    source={s.source}
+                    name={displayName}
+                    sourceLabel={sourceLabel}
+                    colorSlot={colorSlot}
+                    editValue={editingSource === s.source ? editValue : displayName}
+                    saving={savingNickname}
+                    error={nicknameError}
+                    inputRef={editInputRef}
+                    onEditValueChange={setEditValue}
+                    onCommit={() => commitEdit(s.source)}
+                    onCancel={cancelEdit}
+                    onColorSelect={(color) => chooseTagColor(s.source, color)}
+                  />
+                )}
+              </li>
             );
           }
 
@@ -400,117 +554,123 @@ export function MachinesPanel({
           const isCurrentDevice =
             device.id === currentDeviceID ||
             (currentMachineId !== '' && device.machine_id === currentMachineId);
-          const isEditing = editingDeviceId === device.id;
-          const displayName = device.nickname || device.hostname || '';
-          const pillVars = sourcePillVars(device.source_key ?? device.id ?? '');
+          const sourceKey = device.source_key ?? device.id ?? '';
+          const displayName = displayNames[sourceKey] ?? device.nickname ?? device.hostname ?? '';
+          const colorSlot = tagColors[sourceKey];
+          const pillVars = sourcePillVars(sourceKey, colorSlot);
           const alertSource = device.source_key;
           const alertName = device.hostname || displayName || 'machine';
+          const editLabelName = device.hostname || displayName || 'machine';
+          const settingsOpen = openSettingsSource === sourceKey;
 
           return (
-            <div key={device.id} role="listitem" style={S.card}>
-              <div style={S.cardHeader}>
-                <span
+            <li key={device.id} style={{ ...S.rowWrap, listStyle: 'none' }}>
+              <div style={{ ...S.row, ...(isCurrentDevice ? S.rowCurrent : {}) }}>
+                <div
                   style={{
-                    ...S.statusPill,
-                    background: 'var(--surface-2)',
-                    color: device.online ? 'var(--text-primary)' : C.t3,
-                  }}
-                  aria-label={device.online ? 'Online' : 'Offline'}
-                >
-                  {device.online ? 'online' : 'offline'}
-                </span>
-                <span
-                  style={{
-                    ...S.sourcePill,
+                    ...S.rowAccent,
                     background: pillVars.bg,
-                    color: pillVars.fg,
+                    opacity: 0.85,
                   }}
-                >
-                  {device.hostname ?? 'unknown'}
-                </span>
-                {isCurrentDevice && (
-                  <span style={S.thisDeviceBadge}>This device</span>
-                )}
-              </div>
-
-              <div style={S.nameRow}>
-                {isEditing ? (
-                  <input
-                    ref={editInputRef}
-                    style={{
-                      ...S.nicknameInput,
-                      opacity: savingNickname ? 0.5 : 1,
-                      pointerEvents: savingNickname ? 'none' : 'auto',
-                    }}
-                    value={editValue}
-                    onChange={(e) => setEditValue(e.target.value)}
-                    onBlur={() => commitEdit(device.id!)}
-                    onKeyDown={(e) => {
-                      // device.id is non-null here: input only renders when editingDeviceId === device.id,
-                      // and startEdit gates on device.id being truthy before setting editingDeviceId.
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        commitEdit(device.id!);
-                      }
-                      if (e.key === 'Escape') {
-                        e.preventDefault();
-                        cancelEdit();
-                      }
-                    }}
-                    maxLength={32}
-                    spellCheck={false}
-                    aria-label="Edit device nickname"
-                  />
-                ) : (
-                  <span
-                    style={S.cardName}
-                    onClick={() => startEdit(device)}
-                    title="Click to edit nickname"
+                  aria-hidden
+                />
+                <div style={S.rowMain}>
+                  <div style={S.rowTop}>
+                    <span
+                      style={{
+                        ...S.statusPill,
+                        background: 'var(--surface-2)',
+                        color: device.online ? 'var(--text-primary)' : C.t3,
+                      }}
+                      role="status"
+                      aria-label={device.online ? 'Online' : 'Offline'}
+                    >
+                      {device.online ? 'online' : 'offline'}
+                    </span>
+                    <span
+                      style={{
+                        ...S.sourcePill,
+                        background: pillVars.bg,
+                        color: pillVars.fg,
+                      }}
+                    >
+                      {device.hostname ?? 'unknown'}
+                    </span>
+                    {isCurrentDevice && (
+                      <span style={S.thisDeviceBadge}>This device</span>
+                    )}
+                  </div>
+                  <div style={S.cardName}>{displayName}</div>
+                  <div style={S.cardMeta}>
+                    push relay · {device.clip_count ?? 0} clips · {lastSeen(device)}
+                  </div>
+                </div>
+                <div style={S.rowActions}>
+                  <button
+                    type="button"
+                    className="machines-btn"
+                    style={S.customizeBtn}
+                    onClick={() => toggleSettings(sourceKey, displayName)}
+                    aria-expanded={settingsOpen}
+                    aria-label={`Customize ${editLabelName}`}
                   >
-                    {displayName}
-                  </span>
-                )}
-                {nicknameError && editingDeviceId === device.id && (
-                  <span style={S.nicknameErrorText}>{nicknameError}</span>
-                )}
+                    Customize
+                  </button>
+                  {alertSource && (
+                    <AlertToggle
+                      enabled={isAlertEnabled(alertSource)}
+                      name={alertName}
+                      onClick={() => toggleAlert(alertSource, alertName)}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    className="revoke-btn"
+                    style={S.revokeBtn}
+                    onClick={() => setConfirmingRevokeId(device.id ?? null)}
+                  >
+                    Revoke
+                  </button>
+                </div>
               </div>
-
-              <div style={S.cardMeta}>
-                {device.clip_count ?? 0} clips · {lastSeen(device)}
-              </div>
-
-              <div style={S.cardFooter}>
-                {alertSource && (
-                  <AlertToggle
-                    enabled={isAlertEnabled(alertSource)}
-                    name={alertName}
-                    onClick={() => toggleAlert(alertSource, alertName)}
-                  />
-                )}
-                <button
-                  style={S.revokeBtn}
-                  onClick={() => setConfirmingRevokeId(device.id ?? null)}
-                >
-                  Revoke
-                </button>
-              </div>
-            </div>
+              {settingsOpen && (
+                <MachineSettingsPanel
+                  source={sourceKey}
+                  name={editLabelName}
+                  sourceLabel={device.hostname ?? sourceKey}
+                  colorSlot={colorSlot}
+                  editValue={editingSource === sourceKey ? editValue : displayName}
+                  saving={savingNickname}
+                  error={nicknameError}
+                  inputRef={editInputRef}
+                  onEditValueChange={setEditValue}
+                  onCommit={() => commitEdit(sourceKey, device.id)}
+                  onCancel={cancelEdit}
+                  onColorSelect={(color) => chooseTagColor(sourceKey, color)}
+                />
+              )}
+            </li>
           );
         })}
 
-        {/* Pair card — opens SSH pairing wizard */}
-        <button
-          style={S.pairCard}
-          role="listitem"
-          onClick={() => setShowSshDialog(true)}
-          aria-label="Add machine via SSH"
-        >
-          <div style={S.pairCardInner}>
-            <div style={S.pairHeading}>Add via SSH</div>
-            <div style={S.pairBody}>Pair a remote machine over SSH</div>
-          </div>
-        </button>
-      </div>
+        <li style={{ ...S.rowWrap, listStyle: 'none', borderBottom: 'none' }}>
+          <button
+            type="button"
+            className="pair-row"
+            style={S.pairRow}
+            onClick={() => setShowSshDialog(true)}
+            aria-label="Add machine via SSH"
+          >
+            <span style={S.pairPlus} aria-hidden>
+              +
+            </span>
+            <span style={S.pairRowText}>
+              <span style={S.pairHeading}>Pair another machine</span>
+              <span style={S.pairBody}>SSH wizard · installs Cinch where you develop</span>
+            </span>
+          </button>
+        </li>
+      </ul>
 
       {showSshDialog && (
         <AddSshMachineDialog
@@ -563,12 +723,134 @@ function AlertToggle({
   return (
     <button
       type="button"
+      className="machines-btn"
       style={{ ...S.alertBtn, ...(enabled ? S.alertBtnOn : S.alertBtnOff) }}
       onClick={onClick}
       aria-label={`${enabled ? 'Turn desktop alerts off' : 'Turn desktop alerts on'} for ${name}`}
     >
       {enabled ? 'Alerts on' : 'Alerts off'}
     </button>
+  );
+}
+
+function MachineSettingsPanel({
+  source,
+  name,
+  sourceLabel,
+  colorSlot,
+  editValue,
+  saving,
+  error,
+  inputRef,
+  onEditValueChange,
+  onCommit,
+  onCancel,
+  onColorSelect,
+}: {
+  source: string;
+  name: string;
+  sourceLabel: string;
+  colorSlot?: SourceColorSlot;
+  editValue: string;
+  saving: boolean;
+  error: string | null;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  onEditValueChange: (value: string) => void;
+  onCommit: () => void;
+  onCancel: () => void;
+  onColorSelect: (color: SourceColorSlot | null) => void;
+}) {
+  const tagColorFieldId = useId();
+
+  return (
+    <section
+      style={S.settingsPanel}
+      aria-label={`Machine settings for ${name}`}
+    >
+      <div style={S.fieldBlock}>
+        <div style={S.fieldHeader}>
+          <span style={S.fieldLabel}>Name</span>
+          <span style={S.fieldHint}>{sourceLabel}</span>
+        </div>
+        <input
+          ref={inputRef}
+          style={{
+            ...S.nicknameInput,
+            opacity: saving ? 0.5 : 1,
+            pointerEvents: saving ? 'none' : 'auto',
+          }}
+          value={editValue}
+          onChange={(e) => onEditValueChange(e.target.value)}
+          onBlur={onCommit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              onCommit();
+            }
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              onCancel();
+            }
+          }}
+          maxLength={32}
+          spellCheck={false}
+          aria-label="Machine display name"
+        />
+        {error && <span style={S.nicknameErrorText}>{error}</span>}
+      </div>
+
+      <div style={S.fieldBlock}>
+        <div style={S.fieldHeader}>
+          <span id={tagColorFieldId} style={S.fieldLabel}>
+            Tag color
+          </span>
+          <span style={S.fieldHint}>{source.replace(/^remote:/, '')}</span>
+        </div>
+        <fieldset
+          style={{ ...S.colorGrid, ...S.colorFieldset }}
+          aria-labelledby={tagColorFieldId}
+        >
+          <button
+            type="button"
+            style={{
+              ...S.colorOption,
+              ...(colorSlot ? {} : S.colorOptionActive),
+            }}
+            onClick={() => onColorSelect(null)}
+            aria-label={`Auto color for ${name}`}
+          >
+            <span aria-hidden="true" style={S.autoColorSwatch} />
+            Auto
+          </button>
+          {SOURCE_COLOR_OPTIONS.map((option) => {
+            const vars = sourceColorSlotVars(option.value);
+            const active = colorSlot === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                style={{
+                  ...S.colorOption,
+                  ...(active ? S.colorOptionActive : {}),
+                }}
+                onClick={() => onColorSelect(option.value)}
+                aria-label={`${option.label} color for ${name}`}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    ...S.colorOptionSwatch,
+                    background: vars.fg,
+                    boxShadow: `0 0 0 3px ${vars.bg}`,
+                  }}
+                />
+                {option.label}
+              </button>
+            );
+          })}
+        </fieldset>
+      </div>
+    </section>
   );
 }
 
@@ -583,64 +865,206 @@ const S: Record<string, React.CSSProperties> = {
     background: C.bg,
   },
 
-  header: {
+  toolbar: {
     display: 'flex',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    padding: '12px 16px',
+    gap: 'var(--sp-lg)',
+    padding: 'var(--sp-lg) var(--sp-xl)',
     borderBottom: `1px solid ${C.border}`,
     flexShrink: 0,
+    flexWrap: 'wrap',
   },
-  headerTitle: {
-    fontSize: 13,
-    fontWeight: 600,
-    textTransform: 'uppercase',
-    letterSpacing: '0.08em',
-    color: C.t2,
+
+  titleBlock: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'var(--sp-xs)',
+    minWidth: 0,
+    flex: '1 1 200px',
+  },
+
+  pageTitle: {
+    margin: 0,
+    fontSize: 20,
+    fontWeight: 650,
+    letterSpacing: '-0.03em',
+    color: C.t1,
     fontFamily: 'var(--font-body)',
+    lineHeight: 1.2,
   },
-  headerCount: {
+
+  pageSubtitle: {
+    margin: 0,
     fontSize: 12,
+    fontWeight: 500,
+    color: C.t3,
+    fontFamily: 'var(--font-body)',
+    lineHeight: 1.45,
+    maxWidth: 440,
+  },
+
+  toolbarAside: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 'var(--sp-sm)',
+    flexShrink: 0,
+  },
+
+  statPill: {
+    fontSize: 11,
+    fontWeight: 600,
+    color: C.t2,
+    fontFamily: 'var(--font-mono)',
+    fontVariantNumeric: 'tabular-nums',
+    padding: 'var(--sp-xs) var(--sp-sm)',
+    borderRadius: 9999,
+    background: C.card2,
+    border: `1px solid ${C.border}`,
+    whiteSpace: 'nowrap',
+  },
+
+  statPillMuted: {
+    fontSize: 11,
     fontWeight: 500,
     color: C.t3,
     fontFamily: 'var(--font-mono)',
     fontVariantNumeric: 'tabular-nums',
-  },
-
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-    gap: 12,
-    padding: 16,
-    overflowY: 'auto',
-    flex: 1,
-    alignContent: 'start',
-  },
-
-  card: {
-    background: C.card,
+    padding: 'var(--sp-xs) var(--sp-sm)',
+    borderRadius: 9999,
+    background: 'transparent',
     border: `1px solid ${C.border}`,
-    borderRadius: 10,
-    padding: '12px 14px',
+    whiteSpace: 'nowrap',
+  },
+
+  statStrong: {
+    color: C.t1,
+    fontWeight: 700,
+  },
+
+  toolbarPrimary: {
+    background: C.t1,
+    color: C.bg,
+    border: 'none',
+    borderRadius: 'var(--radius-md)',
+    padding: 'var(--sp-sm) var(--sp-md)',
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: 'var(--font-body)',
+    whiteSpace: 'nowrap',
+  },
+
+  list: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 6,
+    flex: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    padding: 'var(--sp-md) 0',
   },
 
-  cardHeader: {
+  rowWrap: {
+    borderBottom: `1px solid ${C.border}`,
+  },
+
+  row: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: 'var(--sp-md)',
+    padding: 'var(--sp-md) var(--sp-xl)',
+    minHeight: 72,
+    boxSizing: 'border-box',
+    background: C.bg,
+    transition: 'background 120ms ease',
+  },
+
+  rowCurrent: {
+    background: C.selected,
+  },
+
+  rowAccent: {
+    width: 3,
+    alignSelf: 'stretch',
+    borderRadius: 2,
+    flexShrink: 0,
+    marginTop: 2,
+    marginBottom: 2,
+    background: C.borderHover,
+  },
+
+  rowMain: {
+    flex: 1,
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'var(--sp-xs)',
+  },
+
+  rowTop: {
     display: 'flex',
     alignItems: 'center',
-    gap: 6,
+    gap: 'var(--sp-sm)',
     flexWrap: 'wrap',
   },
 
+  rowActions: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 'var(--sp-sm)',
+    flexWrap: 'wrap',
+    flexShrink: 0,
+    paddingTop: 2,
+  },
+
+  pairRow: {
+    width: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'var(--sp-md)',
+    padding: 'var(--sp-lg) var(--sp-xl)',
+    margin: '0 var(--sp-md)',
+    boxSizing: 'border-box',
+    background: 'transparent',
+    border: `1px dashed ${C.border}`,
+    borderRadius: 'var(--radius-lg)',
+    cursor: 'pointer',
+    textAlign: 'left',
+    font: 'inherit',
+    color: 'inherit',
+  },
+
+  pairPlus: {
+    width: 36,
+    height: 36,
+    borderRadius: 'var(--radius-md)',
+    background: C.card2,
+    border: `1px solid ${C.border}`,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 20,
+    fontWeight: 500,
+    color: C.accent,
+    flexShrink: 0,
+    lineHeight: 1,
+  },
+
+  pairRowText: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2,
+    minWidth: 0,
+  },
+
   statusPill: {
-    padding: '1px 8px',
+    padding: '1px var(--sp-sm)',
     borderRadius: 9999,
     fontSize: 10,
     fontFamily: 'var(--font-mono)',
-    letterSpacing: '0.04em',
-    textTransform: 'uppercase',
+    letterSpacing: '0.01em',
     flexShrink: 0,
     lineHeight: 1.6,
   },
@@ -648,13 +1072,13 @@ const S: Record<string, React.CSSProperties> = {
   sourcePill: {
     fontSize: 11,
     fontWeight: 600,
-    padding: '2px 6px',
-    borderRadius: 4,
+    padding: '2px var(--sp-sm)',
+    borderRadius: 'var(--radius-sm)',
     fontFamily: 'var(--font-body)',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
-    maxWidth: 120,
+    maxWidth: 200,
   },
 
   thisDeviceBadge: {
@@ -662,23 +1086,16 @@ const S: Record<string, React.CSSProperties> = {
     fontSize: 11,
     fontWeight: 600,
     color: C.t3,
-    padding: '2px 6px',
-    borderRadius: 4,
+    padding: '2px var(--sp-sm)',
+    borderRadius: 'var(--radius-sm)',
     fontFamily: 'var(--font-body)',
     whiteSpace: 'nowrap',
-  },
-
-  nameRow: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 2,
   },
 
   cardName: {
     fontSize: 15,
     fontWeight: 600,
     color: C.t1,
-    cursor: 'pointer',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -687,16 +1104,15 @@ const S: Record<string, React.CSSProperties> = {
   },
 
   nicknameInput: {
-    fontSize: 15,
-    fontWeight: 600,
+    fontSize: 13,
+    fontWeight: 500,
     color: C.t1,
     letterSpacing: '-0.012em',
-    background: 'transparent',
-    border: `1px solid ${C.accent}`,
-    borderRadius: 4,
-    padding: '2px 8px',
+    background: C.card,
+    border: `1px solid ${C.borderHover}`,
+    borderRadius: 'var(--radius-md)',
+    padding: 'var(--sp-sm)',
     outline: 'none',
-    boxShadow: `0 0 0 3px rgba(79,179,169,0.18)`,
     lineHeight: 1.4,
     width: '100%',
     boxSizing: 'border-box',
@@ -719,19 +1135,121 @@ const S: Record<string, React.CSSProperties> = {
     textOverflow: 'ellipsis',
   },
 
-  cardFooter: {
+  customizeBtn: {
+    background: 'transparent',
+    color: C.t2,
+    border: `1px solid ${C.border}`,
+    borderRadius: 'var(--radius-md)',
+    padding: 'var(--sp-xs) var(--sp-sm)',
+    fontSize: 12,
+    fontWeight: 500,
+    cursor: 'pointer',
+    fontFamily: 'var(--font-body)',
+    whiteSpace: 'nowrap',
+  },
+
+  settingsPanel: {
+    marginLeft: 'var(--sp-xl)',
+    marginRight: 'var(--sp-lg)',
+    marginBottom: 'var(--sp-md)',
+    padding: 'var(--sp-md)',
+    borderRadius: 'var(--radius-md)',
+    border: `1px solid ${C.border}`,
+    background: C.card2,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'var(--sp-md)',
+  },
+
+  fieldBlock: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+  },
+
+  fieldHeader: {
     display: 'flex',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+
+  fieldLabel: {
+    fontSize: 11,
+    fontWeight: 600,
+    letterSpacing: '0.01em',
+    color: C.t2,
+    fontFamily: 'var(--font-body)',
+  },
+
+  fieldHint: {
+    minWidth: 0,
+    color: C.t3,
+    fontSize: 11,
+    fontWeight: 600,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily: 'var(--font-mono)',
+  },
+
+  colorGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: 5,
+  },
+
+  colorFieldset: {
+    border: 'none',
+    margin: 0,
+    padding: 0,
+    minWidth: 0,
+    minInlineSize: 0,
+  },
+
+  colorOption: {
+    background: C.card,
+    color: C.t2,
+    border: `1px solid ${C.border}`,
+    borderRadius: 6,
+    padding: '6px 7px',
+    fontSize: 11,
+    fontWeight: 600,
+    display: 'inline-flex',
+    alignItems: 'center',
     gap: 6,
-    marginTop: 2,
+    cursor: 'pointer',
+    minWidth: 0,
+  },
+
+  colorOptionActive: {
+    background: C.selected,
+    border: `1px solid ${C.borderHover}`,
+    color: C.t1,
+  },
+
+  colorOptionSwatch: {
+    width: 9,
+    height: 9,
+    borderRadius: 9999,
+    flexShrink: 0,
+  },
+
+  autoColorSwatch: {
+    width: 9,
+    height: 9,
+    borderRadius: 9999,
+    border: `1px solid ${C.t4}`,
+    background: 'linear-gradient(135deg, var(--pill-1-fg), var(--pill-3-fg), var(--pill-5-fg))',
+    flexShrink: 0,
   },
 
   revokeBtn: {
     background: 'transparent',
     color: C.error,
-    border: '1px solid rgba(255,99,99,0.25)',
-    borderRadius: 6,
-    padding: '4px 8px',
+    border: '1px solid color-mix(in srgb, var(--error) 25%, transparent)',
+    borderRadius: 'var(--radius-md)',
+    padding: 'var(--sp-xs) var(--sp-sm)',
     fontSize: 12,
     fontWeight: 500,
     cursor: 'pointer',
@@ -740,8 +1258,8 @@ const S: Record<string, React.CSSProperties> = {
   },
   alertBtn: {
     background: 'transparent',
-    borderRadius: 6,
-    padding: '4px 8px',
+    borderRadius: 'var(--radius-md)',
+    padding: 'var(--sp-xs) var(--sp-sm)',
     fontSize: 12,
     fontWeight: 500,
     cursor: 'pointer',
@@ -757,28 +1275,8 @@ const S: Record<string, React.CSSProperties> = {
     border: `1px solid ${C.border}`,
   },
 
-  pairCard: {
-    background: 'transparent',
-    border: `1px dashed ${C.border}`,
-    borderRadius: 10,
-    padding: '12px 14px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    width: '100%',
-    boxSizing: 'border-box',
-  },
-
-  pairCardInner: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 4,
-    textAlign: 'center',
-  },
-
   pairHeading: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: 600,
     color: C.accent,
     fontFamily: 'var(--font-body)',
@@ -792,40 +1290,104 @@ const S: Record<string, React.CSSProperties> = {
   },
 
   emptyState: {
-    padding: '40px 20px',
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 'var(--sp-xl)',
+    minHeight: 0,
+  },
+  emptyCard: {
+    maxWidth: 380,
+    width: '100%',
+    padding: 'var(--sp-xl)',
+    borderRadius: 'var(--radius-lg)',
+    border: `1px solid ${C.border}`,
+    background: C.card,
     textAlign: 'center',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'var(--sp-sm)',
+    alignItems: 'center',
+  },
+  emptyKicker: {
+    fontSize: 11,
+    fontWeight: 500,
+    letterSpacing: '0.01em',
+    color: C.t4,
+    fontFamily: 'var(--font-body)',
   },
   emptyHeading: {
-    fontSize: 13,
-    fontWeight: 500,
-    color: C.t2,
-    marginBottom: 6,
+    fontSize: 17,
+    fontWeight: 600,
+    color: C.t1,
     fontFamily: 'var(--font-body)',
+    letterSpacing: '-0.02em',
   },
   emptyBody: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: 500,
     color: C.t3,
-    marginBottom: 12,
     fontFamily: 'var(--font-body)',
-    lineHeight: 1.5,
+    lineHeight: 1.55,
   },
   emptyCode: {
     fontSize: 12,
     fontFamily: 'var(--font-mono)',
-    color: C.t3,
+    color: C.t2,
+    padding: 'var(--sp-sm) var(--sp-md)',
+    borderRadius: 'var(--radius-sm)',
+    background: C.card2,
+    border: `1px solid ${C.border}`,
+  },
+  emptyPrimaryBtn: {
+    marginTop: 'var(--sp-sm)',
+    background: C.t1,
+    color: C.bg,
+    border: 'none',
+    borderRadius: 'var(--radius-md)',
+    padding: 'var(--sp-sm) var(--sp-lg)',
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: 'var(--font-body)',
   },
 
   skeletonRow: {
     display: 'flex',
     alignItems: 'center',
-    gap: 8,
-    padding: '12px 16px',
-    minHeight: 44,
+    gap: 'var(--sp-md)',
+    padding: 'var(--sp-md) var(--sp-xl)',
+    minHeight: 72,
     borderBottom: `1px solid ${C.border}`,
+  },
+  skeletonRowMain: {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'var(--sp-md)',
+    minWidth: 0,
+  },
+  skeletonActions: {
+    display: 'flex',
+    gap: 'var(--sp-sm)',
   },
   skeletonBlock: {
     background: C.card2,
     opacity: 0.5,
+  },
+  skeletonBlockTitle: {
+    height: 22,
+    width: 140,
+    borderRadius: 4,
+    background: C.card2,
+    opacity: 0.55,
+  },
+  skeletonBlockSubtitle: {
+    height: 12,
+    width: 280,
+    borderRadius: 4,
+    background: C.card2,
+    opacity: 0.35,
   },
 };

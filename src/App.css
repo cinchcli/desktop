@@ -273,6 +273,14 @@ html.light {
   .offline-pulse-dot { animation: none !important; }
 }
 
+/* ─── Dialog shadow (theme-aware) ─── */
+:root {
+  --dialog-shadow: 0 8px 48px rgba(10, 8, 5, 0.48);
+}
+html.light {
+  --dialog-shadow: 0 8px 32px rgba(0, 0, 0, 0.10);
+}
+
 /* ─── Loading skeleton shimmer ─── */
 @keyframes shimmer {
   from { transform: translateX(-100%); }
@@ -280,4 +288,112 @@ html.light {
 }
 @media (prefers-reduced-motion: reduce) {
   .shimmer-strip { animation: none !important; }
+}
+
+/* ─── Interaction states ─── */
+
+/* Clip list rows */
+.clip-row {
+  transition: background 80ms ease;
+}
+.clip-row:hover {
+  background: var(--hover);
+}
+
+/* Primary (filled) buttons */
+.btn-primary {
+  transition: opacity 120ms ease, transform 100ms ease;
+}
+.btn-primary:hover {
+  opacity: 0.85;
+}
+.btn-primary:active {
+  transform: scale(0.97);
+  opacity: 0.75;
+}
+
+/* Ghost / outline buttons */
+.btn-ghost {
+  transition: background 100ms ease, border-color 100ms ease, color 100ms ease, transform 100ms ease;
+}
+.btn-ghost:hover {
+  background: var(--hover);
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+.btn-ghost:active {
+  transform: scale(0.97);
+}
+
+/* Rail icon-nav buttons */
+.rail-btn:hover {
+  background: var(--hover) !important;
+  color: var(--text-muted) !important;
+}
+.rail-btn:active {
+  transform: scale(0.9);
+}
+
+/* Small icon buttons (search bar) */
+.icon-btn:hover {
+  color: var(--text-muted) !important;
+  background: var(--hover);
+}
+
+/* Machines panel action buttons */
+.machines-btn {
+  transition: background 100ms ease, border-color 100ms ease, color 100ms ease;
+}
+.machines-btn:hover {
+  background: var(--hover);
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+/* Destructive revoke button */
+.revoke-btn {
+  transition: background 100ms ease, border-color 100ms ease;
+}
+.revoke-btn:hover {
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  border-color: color-mix(in srgb, var(--error) 40%, transparent) !important;
+}
+
+/* "Pair another machine" dashed row */
+.pair-row {
+  transition: background 100ms ease, border-color 100ms ease;
+}
+.pair-row:hover {
+  background: var(--hover) !important;
+  border-color: var(--border-hover) !important;
+}
+
+/* ─── Skeleton shimmer (applied via className) ─── */
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.skeleton-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 20%,
+    rgba(237, 230, 214, 0.06) 50%,
+    transparent 80%
+  );
+  transform: translateX(-100%);
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+html.light .skeleton-shimmer::after {
+  background: linear-gradient(
+    90deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.5) 50%,
+    transparent 80%
+  );
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer::after { animation: none !important; }
 }
