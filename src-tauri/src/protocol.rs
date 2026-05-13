@@ -10,8 +10,8 @@ pub use client_core::config::{
 };
 pub use client_core::protocol::{
     Clip, DeviceInfo, WSMessage, ACTION_CLIPBOARD_CONTENT, ACTION_CLIP_DELETED, ACTION_CLIP_PINNED,
-    ACTION_KEY_EXCHANGE_REQUESTED, ACTION_NEW_CLIP, ACTION_PING, ACTION_PONG, ACTION_REVOKED,
-    ACTION_SEND_CLIPBOARD, ACTION_TOKEN_ROTATED,
+    ACTION_DEVICE_CODE_PENDING, ACTION_KEY_EXCHANGE_REQUESTED, ACTION_NEW_CLIP, ACTION_PING,
+    ACTION_PONG, ACTION_REVOKED, ACTION_SEND_CLIPBOARD, ACTION_TOKEN_ROTATED,
 };
 
 use serde::{Deserialize, Serialize};
@@ -33,4 +33,20 @@ pub struct RelayProfileSummary {
     pub hostname: String,
     pub is_active: bool,
     pub device_count: Option<u32>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn device_code_pending_roundtrip() {
+        let wire = r#"{"action":"device_code_pending","hostname":"dev-box-3","user_code":"ABCD-1234","requested_at":1747171200,"source_region":"us-west"}"#;
+        let msg: WSMessage = serde_json::from_str(wire).expect("parse");
+        assert_eq!(msg.action, ACTION_DEVICE_CODE_PENDING);
+        assert_eq!(msg.hostname.as_deref(), Some("dev-box-3"));
+        assert_eq!(msg.user_code.as_deref(), Some("ABCD-1234"));
+        assert_eq!(msg.requested_at, Some(1747171200));
+        assert_eq!(msg.source_region.as_deref(), Some("us-west"));
+    }
 }
