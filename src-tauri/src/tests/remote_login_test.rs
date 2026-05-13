@@ -32,7 +32,9 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/auth/device-code/complete"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"status":"complete"})))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"status":"complete"})),
+            )
             .expect(1)
             .mount(&server)
             .await;
@@ -44,7 +46,11 @@ mod tests {
             .expect("approve should succeed");
 
         server.verify().await;
-        assert_eq!(pending_count(&pending), 0, "pending list must be empty after approve");
+        assert_eq!(
+            pending_count(&pending),
+            0,
+            "pending list must be empty after approve"
+        );
     }
 
     /// deny_remote_login_impl posts to /cinch.v1.AuthService/DeviceCodeDeny and
@@ -67,7 +73,11 @@ mod tests {
             .expect("deny should succeed");
 
         server.verify().await;
-        assert_eq!(pending_count(&pending), 0, "pending list must be empty after deny");
+        assert_eq!(
+            pending_count(&pending),
+            0,
+            "pending list must be empty after deny"
+        );
     }
 
     /// approve_remote_login_impl returns an error when the relay returns 401,
@@ -79,8 +89,9 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/auth/device-code/complete"))
             .respond_with(
-                ResponseTemplate::new(401)
-                    .set_body_json(serde_json::json!({"error":"unauthorized","message":"","fix":""})),
+                ResponseTemplate::new(401).set_body_json(
+                    serde_json::json!({"error":"unauthorized","message":"","fix":""}),
+                ),
             )
             .expect(1)
             .mount(&server)
@@ -92,7 +103,11 @@ mod tests {
             approve_remote_login_impl("ABCD-1234", &server.uri(), "test-token", &pending).await;
 
         assert!(result.is_err(), "must propagate relay error");
-        assert_eq!(pending_count(&pending), 1, "pending list must be unchanged on error");
+        assert_eq!(
+            pending_count(&pending),
+            1,
+            "pending list must be unchanged on error"
+        );
     }
 
     /// deny_remote_login_impl returns an error on relay failure and does NOT
@@ -104,8 +119,9 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/cinch.v1.AuthService/DeviceCodeDeny"))
             .respond_with(
-                ResponseTemplate::new(401)
-                    .set_body_json(serde_json::json!({"error":"unauthorized","message":"","fix":""})),
+                ResponseTemplate::new(401).set_body_json(
+                    serde_json::json!({"error":"unauthorized","message":"","fix":""}),
+                ),
             )
             .expect(1)
             .mount(&server)
@@ -117,6 +133,10 @@ mod tests {
             deny_remote_login_impl("ABCD-1234", &server.uri(), "test-token", &pending).await;
 
         assert!(result.is_err(), "must propagate relay error");
-        assert_eq!(pending_count(&pending), 1, "pending list must be unchanged on error");
+        assert_eq!(
+            pending_count(&pending),
+            1,
+            "pending list must be unchanged on error"
+        );
     }
 }
