@@ -20,6 +20,7 @@ import {
 } from './lib/machineDisplayNames';
 import { C } from './design';
 import { useAuthState, retryAuth, signOut, type AuthProgress, type AuthErrorReason } from './lib/state/auth';
+import { useNotifyOnRemoteLogin } from './lib/settings';
 import SettingsPane from './SettingsPane';
 import { AdoptedAuthToast } from './components/AdoptedAuthToast';
 import { OfflineQueueDroppedToast } from './components/OfflineQueueDroppedToast';
@@ -103,6 +104,8 @@ function App() {
   }, []);
 
   const auth = useAuthState();
+  const [notifyOnRemoteLogin] = useNotifyOnRemoteLogin();
+
   // CLI handoff (cinch://login from `cinch auth login`). Shown above all
   // auth-state branches so the dialog opens regardless of LocalOnly /
   // Authenticating / Authenticated.
@@ -115,7 +118,11 @@ function App() {
   }, []);
 
   // OS notification when a remote login request arrives (device_code_pending).
+  // Re-runs when notifyOnRemoteLogin changes so toggling the setting takes
+  // effect immediately: when disabled the effect returns early (no listener
+  // is registered), and the cleanup from the previous run unsubscribes.
   useEffect(() => {
+    if (!notifyOnRemoteLogin) return;
     let cancelled = false;
     let unsub: (() => void) | null = null;
     (async () => {
@@ -134,7 +141,7 @@ function App() {
       });
     })();
     return () => { cancelled = true; unsub?.(); };
-  }, []);
+  }, [notifyOnRemoteLogin]);
 
   const [_status, setStatus] = useState('connecting');
   const [clips, setClips] = useState<LocalClip[]>([]);
