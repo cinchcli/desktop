@@ -803,8 +803,7 @@ pub(crate) async fn approve_remote_login_impl(
     token: &str,
     pending: &crate::auth::state::PendingCodesHandle,
 ) -> Result<(), String> {
-    let client =
-        client_core::http::RestClient::new(relay_url, token).map_err(|e| e.to_string())?;
+    let client = client_core::http::RestClient::new(relay_url, token).map_err(|e| e.to_string())?;
     client
         .complete_device_code(user_code)
         .await
@@ -821,8 +820,7 @@ pub(crate) async fn deny_remote_login_impl(
     token: &str,
     pending: &crate::auth::state::PendingCodesHandle,
 ) -> Result<(), String> {
-    let client =
-        client_core::http::RestClient::new(relay_url, token).map_err(|e| e.to_string())?;
+    let client = client_core::http::RestClient::new(relay_url, token).map_err(|e| e.to_string())?;
     client
         .deny_device_code(user_code)
         .await

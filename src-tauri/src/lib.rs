@@ -530,8 +530,10 @@ pub fn run() {
             // TTL sweeper: drop pending device-code entries older than 5 minutes
             // every 30 seconds; refresh tray badge when the count changes.
             {
-                let pending: crate::auth::state::PendingCodesHandle =
-                    app.state::<crate::auth::state::PendingCodesHandle>().inner().clone();
+                let pending: crate::auth::state::PendingCodesHandle = app
+                    .state::<crate::auth::state::PendingCodesHandle>()
+                    .inner()
+                    .clone();
                 let sweeper_handle = handle.clone();
                 tauri::async_runtime::spawn(async move {
                     let ttl = std::time::Duration::from_secs(5 * 60);

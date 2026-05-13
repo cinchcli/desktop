@@ -62,7 +62,9 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     let menu = Menu::with_items(
         app,
-        &[&open, &sep1, &pending, &sep2, &status, &sep3, &no_clips, &sep4, &quit],
+        &[
+            &open, &sep1, &pending, &sep2, &status, &sep3, &no_clips, &sep4, &quit,
+        ],
     )?;
 
     let tray_img = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon.png"))?;
