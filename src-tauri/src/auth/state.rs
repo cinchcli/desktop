@@ -246,7 +246,10 @@ pub type PendingCodesHandle = Arc<Mutex<Vec<PendingDeviceCode>>>;
 /// Push `p` onto the list, silently deduplicating by `user_code`.
 pub fn add_pending_code(handle: &PendingCodesHandle, p: PendingDeviceCode) {
     let mut guard = handle.lock().unwrap();
-    if guard.iter().any(|existing| existing.user_code == p.user_code) {
+    if guard
+        .iter()
+        .any(|existing| existing.user_code == p.user_code)
+    {
         return;
     }
     guard.push(p);

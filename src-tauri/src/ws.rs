@@ -12,9 +12,11 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use crate::auth::AuthStateHandle;
 use crate::clipboard::backend::PollContent;
 use crate::clipboard::ClipboardService;
+use crate::auth::state::PendingCodesHandle;
 use crate::protocol::{
-    WSMessage, ACTION_CLIP_DELETED, ACTION_CLIP_PINNED, ACTION_KEY_EXCHANGE_REQUESTED,
-    ACTION_NEW_CLIP, ACTION_PING, ACTION_REVOKED, ACTION_SEND_CLIPBOARD, ACTION_TOKEN_ROTATED,
+    WSMessage, ACTION_CLIP_DELETED, ACTION_CLIP_PINNED, ACTION_DEVICE_CODE_PENDING,
+    ACTION_KEY_EXCHANGE_REQUESTED, ACTION_NEW_CLIP, ACTION_PING, ACTION_REVOKED,
+    ACTION_SEND_CLIPBOARD, ACTION_TOKEN_ROTATED,
 };
 use crate::store::{db::Database, models::LocalClip};
 use crate::tray::{self, TrayState};
@@ -101,6 +103,7 @@ pub fn spawn_ws_client(
     ws_status: Arc<WsStatus>,
     auth_handle: AuthStateHandle,
     relay_connected: Arc<AtomicBool>,
+    pending_handle: PendingCodesHandle,
 ) -> tauri::async_runtime::JoinHandle<()> {
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -126,6 +129,7 @@ pub fn spawn_ws_client(
                 &auth_handle,
                 &relay_connected,
                 &retry_gate,
+                &pending_handle,
             )
             .await
             {
@@ -161,6 +165,7 @@ async fn connect_and_listen(
     auth_handle: &AuthStateHandle,
     relay_connected: &Arc<AtomicBool>,
     retry_gate: &Arc<Mutex<Option<std::time::Instant>>>,
+    pending_handle: &PendingCodesHandle,
 ) -> Result<(), String> {
     let ws_base = relay_url
         .replace("https://", "wss://")
@@ -267,6 +272,7 @@ async fn connect_and_listen(
                     relay_url,
                     token,
                     retry_gate,
+                    pending_handle,
                 )
                 .await;
             }
@@ -327,6 +333,7 @@ async fn handle_text_message(
     relay_url: &str,
     token: &str,
     retry_gate: &Arc<Mutex<Option<std::time::Instant>>>,
+    pending_handle: &PendingCodesHandle,
 ) {
     let msg: WSMessage = match serde_json::from_str(text) {
         Ok(m) => m,
@@ -743,6 +750,21 @@ async fn handle_text_message(
                 }
             });
         }
+        ACTION_DEVICE_CODE_PENDING => {
+            let pending = crate::auth::state::PendingDeviceCode {
+                user_code: msg.user_code.unwrap_or_default(),
+                hostname: msg.hostname.unwrap_or_else(|| "unknown".into()),
+                source_region: msg.source_region.unwrap_or_default(),
+                requested_at: msg.requested_at.unwrap_or_else(|| chrono::Utc::now().timestamp()),
+            };
+            if pending.user_code.is_empty() {
+                warn!("device_code_pending: missing user_code");
+                return;
+            }
+            crate::auth::state::add_pending_code(pending_handle, pending.clone());
+            crate::events::DeviceCodePending(pending).emit(app).ok();
+            // TODO: tray::set_pending_count(app, crate::auth::state::pending_count(pending_handle)) — wired in Task 3.5
+        }
         other => {
             warn!("unknown action: {}", other);
         }
@@ -955,5 +977,77 @@ pub fn dispatch_ws_401_for_test(body: &str) -> crate::auth::Ws401Reason {
         crate::auth::Ws401Reason::DeviceRevoked
     } else {
         crate::auth::Ws401Reason::InvalidToken
+    }
+}
+
+/// Pure helper: map a `WSMessage` to a `PendingDeviceCode` if the required
+/// `user_code` field is present and non-empty. Returns `None` otherwise.
+/// Extracted so it can be unit-tested without a running Tauri app handle.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn pending_from_ws_message(
+    msg: &crate::protocol::WSMessage,
+) -> Option<crate::auth::state::PendingDeviceCode> {
+    let user_code = msg.user_code.clone().unwrap_or_default();
+    if user_code.is_empty() {
+        return None;
+    }
+    Some(crate::auth::state::PendingDeviceCode {
+        user_code,
+        hostname: msg
+            .hostname
+            .clone()
+            .unwrap_or_else(|| "unknown".into()),
+        source_region: msg.source_region.clone().unwrap_or_default(),
+        requested_at: msg
+            .requested_at
+            .unwrap_or_else(|| chrono::Utc::now().timestamp()),
+    })
+}
+
+#[cfg(test)]
+mod pending_tests {
+    use super::*;
+    use crate::protocol::WSMessage;
+
+    #[test]
+    fn pending_from_ws_message_parses_valid_frame() {
+        let msg: WSMessage = serde_json::from_str(
+            r#"{"action":"device_code_pending","hostname":"dev-box-3","user_code":"ABCD-1234","requested_at":1747171200,"source_region":"us-west"}"#,
+        )
+        .unwrap();
+        let p = pending_from_ws_message(&msg).unwrap();
+        assert_eq!(p.user_code, "ABCD-1234");
+        assert_eq!(p.hostname, "dev-box-3");
+        assert_eq!(p.source_region, "us-west");
+        assert_eq!(p.requested_at, 1747171200);
+    }
+
+    #[test]
+    fn pending_from_ws_message_rejects_missing_user_code() {
+        let msg: WSMessage = serde_json::from_str(
+            r#"{"action":"device_code_pending","hostname":"dev-box-3"}"#,
+        )
+        .unwrap();
+        assert!(pending_from_ws_message(&msg).is_none());
+    }
+
+    #[test]
+    fn pending_from_ws_message_rejects_empty_user_code() {
+        let msg: WSMessage = serde_json::from_str(
+            r#"{"action":"device_code_pending","hostname":"dev-box-3","user_code":""}"#,
+        )
+        .unwrap();
+        assert!(pending_from_ws_message(&msg).is_none());
+    }
+
+    #[test]
+    fn pending_from_ws_message_defaults_hostname_to_unknown() {
+        let msg: WSMessage = serde_json::from_str(
+            r#"{"action":"device_code_pending","user_code":"WXYZ-5678"}"#,
+        )
+        .unwrap();
+        let p = pending_from_ws_message(&msg).unwrap();
+        assert_eq!(p.hostname, "unknown");
+        assert_eq!(p.user_code, "WXYZ-5678");
     }
 }

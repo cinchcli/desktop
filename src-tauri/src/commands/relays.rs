@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::auth::{add_relay_profile, load_multi_config, transition, AuthState, AuthStateHandle};
 use crate::protocol::MultiConfigHandle;
@@ -226,6 +226,7 @@ pub async fn pair_with_token(
         });
     }
 
+    let pending_codes: tauri::State<'_, crate::auth::state::PendingCodesHandle> = app.state();
     let handle = crate::ws::spawn_ws_client(
         &app,
         ws_relay_url,
@@ -235,6 +236,7 @@ pub async fn pair_with_token(
         ws_status.inner().clone(),
         auth_handle.inner().clone(),
         relay_connected.inner().clone(),
+        pending_codes.inner().clone(),
     );
     ws_abort.replace(handle);
 

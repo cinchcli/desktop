@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder, Event};
 
+use auth::state::PendingCodesHandle;
 use auth::{AuthState, AuthStateHandle};
 use protocol::MultiConfigHandle;
 
@@ -81,6 +82,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             events::OfflineQueueDropped,
             events::ClipDecryptFailed,
             events::ClipPinned,
+            events::DeviceCodePending,
         ])
 }
 
@@ -137,6 +139,11 @@ pub fn run() {
     // Created here so the FS watcher (spawn_credential_watcher) has a handle to funnel
     // `transition()` calls through. Plan 03 Task 1 will extend the initial state setup.
     let auth_state_handle: AuthStateHandle = Arc::new(Mutex::new(AuthState::default()));
+
+    // PendingCodesHandle — in-memory list of pending device-code approval requests
+    // forwarded from the relay via `device_code_pending` WS messages (Task 3.3).
+    // Registered as Tauri state so approve/deny commands (Task 3.4) can access it.
+    let pending_codes_handle: PendingCodesHandle = Arc::new(Mutex::new(Vec::new()));
 
     let specta_builder = make_specta_builder();
 
@@ -209,6 +216,7 @@ pub fn run() {
         .manage(ws_status.clone())
         .manage(relay_connected.clone())
         .manage(auth_state_handle.clone())
+        .manage(pending_codes_handle.clone())
         .manage(previous_app_pid.clone())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -270,6 +278,7 @@ pub fn run() {
                 let dl_ws_abort = ws_abort_handle.clone();
                 let dl_pending = pending_relay_add.clone();
                 let dl_pending_auth = pending_auth_relay.clone();
+                let dl_pending_codes = pending_codes_handle.clone();
                 app.deep_link().on_open_url(move |event| {
                     let urls = event.urls();
                     for url in &urls {
@@ -430,6 +439,7 @@ pub fn run() {
                                 dl_ws_status.clone(),
                                 dl_auth_handle.clone(),
                                 dl_relay_connected.clone(),
+                                dl_pending_codes.clone(),
                             );
                             dl_ws_abort.replace(join_handle);
 
@@ -471,6 +481,8 @@ pub fn run() {
                 // Spawn WebSocket client
                 let ws_auth_handle: AuthStateHandle =
                     app.state::<AuthStateHandle>().inner().clone();
+                let ws_pending_handle: PendingCodesHandle =
+                    app.state::<PendingCodesHandle>().inner().clone();
                 let join = ws::spawn_ws_client(
                     handle,
                     ws_relay_url.clone(),
@@ -480,6 +492,7 @@ pub fn run() {
                     ws_status.clone(),
                     ws_auth_handle,
                     relay_connected.clone(),
+                    ws_pending_handle,
                 );
                 ws_abort_handle.replace(join);
             } else {

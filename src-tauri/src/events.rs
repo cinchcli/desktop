@@ -77,3 +77,9 @@ pub struct ClipPinned {
     pub is_pinned: bool,
     pub pin_note: Option<String>,
 }
+
+/// Fired when the relay pushes a `device_code_pending` WebSocket message, indicating
+/// that a CLI `cinch auth login --user EMAIL` has started and is awaiting desktop
+/// approval. The React layer uses this event to surface the approval UI.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, specta::Type, tauri_specta::Event)]
+pub struct DeviceCodePending(pub crate::auth::state::PendingDeviceCode);
