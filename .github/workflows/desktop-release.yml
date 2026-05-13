@@ -1,4 +1,4 @@
-name: Desktop Release
+name: Release
 
 on:
   push:
@@ -32,6 +32,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#desktop-v}" >> "$GITHUB_OUTPUT"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -131,7 +135,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'Cinch Desktop ${{ github.ref_name }}'
+          releaseName: 'Cinch Desktop v${{ steps.ver.outputs.version }}'
           releaseBody: 'See the assets below to download the Cinch desktop app.'
           releaseDraft: false
           prerelease: false
