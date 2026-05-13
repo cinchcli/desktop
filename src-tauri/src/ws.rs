@@ -9,10 +9,10 @@ use tokio::sync::Mutex;
 use tokio::time::{self, Duration};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
+use crate::auth::state::PendingCodesHandle;
 use crate::auth::AuthStateHandle;
 use crate::clipboard::backend::PollContent;
 use crate::clipboard::ClipboardService;
-use crate::auth::state::PendingCodesHandle;
 use crate::protocol::{
     WSMessage, ACTION_CLIP_DELETED, ACTION_CLIP_PINNED, ACTION_DEVICE_CODE_PENDING,
     ACTION_KEY_EXCHANGE_REQUESTED, ACTION_NEW_CLIP, ACTION_PING, ACTION_REVOKED,
@@ -755,7 +755,9 @@ async fn handle_text_message(
                 user_code: msg.user_code.unwrap_or_default(),
                 hostname: msg.hostname.unwrap_or_else(|| "unknown".into()),
                 source_region: msg.source_region.unwrap_or_default(),
-                requested_at: msg.requested_at.unwrap_or_else(|| chrono::Utc::now().timestamp()),
+                requested_at: msg
+                    .requested_at
+                    .unwrap_or_else(|| chrono::Utc::now().timestamp()),
             };
             if pending.user_code.is_empty() {
                 warn!("device_code_pending: missing user_code");
@@ -763,7 +765,7 @@ async fn handle_text_message(
             }
             crate::auth::state::add_pending_code(pending_handle, pending.clone());
             crate::events::DeviceCodePending(pending).emit(app).ok();
-            // TODO: tray::set_pending_count(app, crate::auth::state::pending_count(pending_handle)) — wired in Task 3.5
+            crate::tray::set_pending_count(app, crate::auth::state::pending_count(pending_handle));
         }
         other => {
             warn!("unknown action: {}", other);
@@ -993,10 +995,7 @@ pub(crate) fn pending_from_ws_message(
     }
     Some(crate::auth::state::PendingDeviceCode {
         user_code,
-        hostname: msg
-            .hostname
-            .clone()
-            .unwrap_or_else(|| "unknown".into()),
+        hostname: msg.hostname.clone().unwrap_or_else(|| "unknown".into()),
         source_region: msg.source_region.clone().unwrap_or_default(),
         requested_at: msg
             .requested_at
@@ -1024,10 +1023,9 @@ mod pending_tests {
 
     #[test]
     fn pending_from_ws_message_rejects_missing_user_code() {
-        let msg: WSMessage = serde_json::from_str(
-            r#"{"action":"device_code_pending","hostname":"dev-box-3"}"#,
-        )
-        .unwrap();
+        let msg: WSMessage =
+            serde_json::from_str(r#"{"action":"device_code_pending","hostname":"dev-box-3"}"#)
+                .unwrap();
         assert!(pending_from_ws_message(&msg).is_none());
     }
 
@@ -1042,10 +1040,9 @@ mod pending_tests {
 
     #[test]
     fn pending_from_ws_message_defaults_hostname_to_unknown() {
-        let msg: WSMessage = serde_json::from_str(
-            r#"{"action":"device_code_pending","user_code":"WXYZ-5678"}"#,
-        )
-        .unwrap();
+        let msg: WSMessage =
+            serde_json::from_str(r#"{"action":"device_code_pending","user_code":"WXYZ-5678"}"#)
+                .unwrap();
         let p = pending_from_ws_message(&msg).unwrap();
         assert_eq!(p.hostname, "unknown");
         assert_eq!(p.user_code, "WXYZ-5678");
