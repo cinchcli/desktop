@@ -375,7 +375,7 @@ function App() {
         return;
       }
       if (selectedClip) {
-        if (e.key === 'Enter' && (!(e.target instanceof HTMLInputElement) || e.target === searchRef.current)) {
+        if (e.key === 'Enter' && (!isTextEntry || e.target === searchRef.current)) {
           e.preventDefault();
           copyClip(selectedClip);
         }
