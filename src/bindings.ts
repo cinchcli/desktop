@@ -120,6 +120,7 @@ export const events = {
 	clipDeleted: makeEvent<ClipDeleted>("clip-deleted"),
 	clipPinned: makeEvent<ClipPinned>("clip-pinned"),
 	clipReceived: makeEvent<ClipReceived>("clip-received"),
+	deviceCodePending: makeEvent<DeviceCodePending>("device-code-pending"),
 	imageDownloadComplete: makeEvent<ImageDownloadComplete>("image-download-complete"),
 	imageDownloadFailed: makeEvent<ImageDownloadFailed>("image-download-failed"),
 	newSourceDetected: makeEvent<NewSourceDetected>("new-source-detected"),
@@ -213,6 +214,13 @@ export type Device = {
 	machine_id?: string | null,
 };
 
+/**
+ *  Fired when the relay pushes a `device_code_pending` WebSocket message, indicating
+ *  that a CLI `cinch auth login --user EMAIL` has started and is awaiting desktop
+ *  approval. The React layer uses this event to surface the approval UI.
+ */
+export type DeviceCodePending = PendingDeviceCode;
+
 export type ImageDownloadComplete = string;
 
 export type ImageDownloadFailed = string;
@@ -253,6 +261,18 @@ export type PairWithTokenResult = {
 	relay_id: string,
 	user_id: string,
 	device_id: string,
+};
+
+/**
+ *  A device-code approval request forwarded from the relay via WebSocket.
+ *  Derives `specta::Type` so tauri-specta can generate the TypeScript binding.
+ */
+export type PendingDeviceCode = {
+	user_code: string,
+	hostname: string,
+	source_region: string,
+	// Unix timestamp (seconds) when the request arrived at the relay.
+	requested_at: number,
 };
 
 /**

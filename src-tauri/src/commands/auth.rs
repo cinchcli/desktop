@@ -282,6 +282,8 @@ pub fn sign_in(
                     .await;
             });
 
+            let pending_codes2: crate::auth::state::PendingCodesHandle =
+                app2.state::<crate::auth::state::PendingCodesHandle>().inner().clone();
             let jh = crate::ws::spawn_ws_client(
                 &app2,
                 relay2.clone(),
@@ -291,6 +293,7 @@ pub fn sign_in(
                 ws_status,
                 handle2,
                 relay_connected,
+                pending_codes2,
             );
             ws_abort.replace(jh);
 
@@ -480,6 +483,7 @@ pub async fn handle_deeplink(
     let clipboard: State<'_, Arc<crate::clipboard::ClipboardService>> = app.state();
     let ws_status: State<'_, Arc<WsStatus>> = app.state();
     let relay_connected: State<'_, Arc<std::sync::atomic::AtomicBool>> = app.state();
+    let pending_codes: State<'_, crate::auth::state::PendingCodesHandle> = app.state();
     let join_handle = crate::ws::spawn_ws_client(
         &app,
         relay_url.clone(),
@@ -489,6 +493,7 @@ pub async fn handle_deeplink(
         ws_status.inner().clone(),
         handle.inner().clone(),
         relay_connected.inner().clone(),
+        pending_codes.inner().clone(),
     );
     ws_abort.replace(join_handle);
 
