@@ -124,15 +124,13 @@ function App() {
         const result = await requestPermission();
         granted = result === 'granted';
       }
-      if (cancelled) return;
+      if (cancelled || !granted) return;
       unsub = await events.deviceCodePending.listen((e) => {
         const p = e.payload;
-        if (granted) {
-          sendNotification({
-            title: 'Approve remote login?',
-            body: `From ${p.hostname}${p.source_region ? ` (${p.source_region})` : ''}\nCode: ${p.user_code}`,
-          });
-        }
+        sendNotification({
+          title: 'Approve remote login?',
+          body: `From ${p.hostname}${p.source_region ? ` (${p.source_region})` : ''}\nCode: ${p.user_code}`,
+        });
       });
     })();
     return () => { cancelled = true; unsub?.(); };
