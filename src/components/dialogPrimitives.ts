@@ -18,7 +18,7 @@ export const dialogStyles: Record<string, CSSProperties> = {
     padding: 18,
     maxWidth: 380,
     width: '100%',
-    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.18)',
+    boxShadow: 'var(--dialog-shadow)',
   },
   title: { fontSize: 13, fontWeight: 600, color: C.t1, marginBottom: 6 },
   body: { fontSize: 12, color: C.t2, marginBottom: 16, lineHeight: 1.55 },

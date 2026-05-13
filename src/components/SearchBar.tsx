@@ -149,7 +149,7 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
         />
 
         {value && (
-          <button type="button" onClick={onClear} aria-label="Clear search" style={S.iconBtn}>
+          <button type="button" onClick={onClear} aria-label="Clear search" className="icon-btn" style={S.iconBtn}>
             <IconX size={12} />
           </button>
         )}
@@ -159,6 +159,7 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
           onClick={onToggleTheme}
           aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
           title={theme === 'dark' ? 'Light theme' : 'Dark theme'}
+          className="icon-btn"
           style={S.iconBtn}
         >
           {theme === 'dark' ? <IconSun size={14} /> : <IconMoon size={14} />}

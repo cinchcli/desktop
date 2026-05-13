@@ -33,4 +33,11 @@ describe('sourcePillVars', () => {
     ].map(s => JSON.stringify(sourcePillVars(s))));
     expect(slots.size).toBeGreaterThanOrEqual(3);
   });
+
+  it('uses an explicit palette slot when a machine tag color is set', () => {
+    expect(sourcePillVars('remote:prod-shell', 'amber')).toEqual({
+      bg: 'var(--pill-2-bg)',
+      fg: 'var(--pill-2-fg)',
+    });
+  });
 });

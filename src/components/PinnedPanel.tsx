@@ -1,6 +1,7 @@
 import type { CSSProperties, RefObject } from 'react';
 import type { LocalClip } from '../bindings';
 import { C, formatTime } from '../design';
+import type { MachineTagColorMap } from '../lib/machineTagColors';
 import { SourcePill } from './SourcePill';
 import { ClipDetail } from './ClipDetail';
 
@@ -14,12 +15,13 @@ interface PinnedPanelProps {
   onDelete: (clip: LocalClip) => void;
   query: string;
   deviceNicknames: Record<string, string>;
+  tagColors?: MachineTagColorMap;
   listRef: RefObject<HTMLDivElement | null>;
 }
 
 export function PinnedPanel({
   clips, selected, onSelect, onCopy, onPin, onUnpin, onDelete,
-  query, deviceNicknames, listRef,
+  query, deviceNicknames, tagColors = {}, listRef,
 }: PinnedPanelProps) {
   const groups = groupByPinNote(clips);
 
@@ -49,6 +51,7 @@ export function PinnedPanel({
                   onClick={() => onSelect(clip)}
                   onDoubleClick={() => onCopy(clip)}
                   nickname={deviceNicknames[clip.source]}
+                  colorSlot={tagColors[clip.source]}
                 />
               ))}
             </section>
@@ -61,6 +64,8 @@ export function PinnedPanel({
         onCopy={onCopy}
         onPin={(c) => c.is_pinned ? onUnpin(c) : onPin(c)}
         onDelete={onDelete}
+        tagColors={tagColors}
+        sourceDisplayNames={deviceNicknames}
       />
     </>
   );
@@ -80,13 +85,14 @@ function groupByPinNote(clips: LocalClip[]): NoteGroup[] {
 }
 
 function PinnedRow({
-  clip, selected, onClick, onDoubleClick, nickname,
+  clip, selected, onClick, onDoubleClick, nickname, colorSlot,
 }: {
   clip: LocalClip;
   selected: boolean;
   onClick: () => void;
   onDoubleClick: () => void;
   nickname?: string;
+  colorSlot?: MachineTagColorMap[string];
 }) {
   const preview = clip.content.replace(/\s+/g, ' ').trim().substring(0, 140);
   return (
@@ -96,6 +102,7 @@ function PinnedRow({
       aria-selected={selected}
       aria-label={preview || 'pinned clip'}
       tabIndex={0}
+      className="clip-row"
       style={{ ...S.row, ...(selected ? S.rowActive : {}) }}
       onClick={onClick}
       onKeyDown={(e) => {
@@ -108,7 +115,7 @@ function PinnedRow({
     >
       <span style={S.preview}>{preview || ' '}</span>
       <span style={S.meta}>
-        <SourcePill source={clip.source} status={clip.source === 'local' ? 'local' : 'remote'} nickname={nickname} />
+        <SourcePill source={clip.source} status={clip.source === 'local' ? 'local' : 'remote'} nickname={nickname} colorSlot={colorSlot} />
         <span style={{ color: C.t4 }}>·</span>
         <span>{formatTime(clip.created_at)}</span>
       </span>
@@ -118,7 +125,7 @@ function PinnedRow({
 
 const S: Record<string, CSSProperties> = {
   col: {
-    width: 320,
+    width: 'var(--list-width, 320px)',
     flexShrink: 0,
     background: C.card,
     borderRight: `1px solid ${C.border}`,

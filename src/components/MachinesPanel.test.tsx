@@ -17,6 +17,7 @@ vi.mock('../bindings', () => ({
 describe('MachinesPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     vi.mocked(commands.listDevices).mockResolvedValue({
       status: 'ok',
       data: [
@@ -37,6 +38,7 @@ describe('MachinesPanel', () => {
       data: [{ source: 'remote:prod', alert_enabled: false }],
     });
     vi.mocked(commands.setSourceAlertEnabled).mockResolvedValue({ status: 'ok', data: null });
+    vi.mocked(commands.setDeviceNickname).mockResolvedValue({ status: 'ok', data: null });
   });
 
   it('shows a per-machine desktop alert toggle and persists changes', async () => {
@@ -55,5 +57,71 @@ describe('MachinesPanel', () => {
     await waitFor(() => {
       expect(commands.setSourceAlertEnabled).toHaveBeenCalledWith('remote:prod', true);
     });
+  });
+
+  it('shows machine customization inline and persists a tag color', async () => {
+    render(
+      <MachinesPanel
+        currentDeviceID="local-device"
+        onShowToast={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /customize prod/i }));
+    const settings = screen.getByRole('region', { name: /machine settings for prod/i });
+    fireEvent.click(screen.getByRole('button', { name: /amber color for prod/i }));
+
+    expect(localStorage.getItem('cinch.machineTagColors.v1')).toBe(
+      JSON.stringify({ 'remote:prod': 'amber' }),
+    );
+    expect(screen.queryByLabelText(/choose tag color for prod/i)).not.toBeInTheDocument();
+    expect(settings).toContainElement(screen.getByRole('button', { name: /amber color for prod/i }));
+    expect(screen.getAllByText('prod')[0]).toHaveStyle({
+      background: 'var(--pill-2-bg)',
+      color: 'var(--pill-2-fg)',
+    });
+  });
+
+  it('makes machine name editing explicit and persists the new name', async () => {
+    render(
+      <MachinesPanel
+        currentDeviceID="local-device"
+        onShowToast={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /customize prod/i }));
+    const input = screen.getByLabelText(/machine display name/i);
+    fireEvent.change(input, { target: { value: 'Build Mac' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(commands.setDeviceNickname).toHaveBeenCalledWith('d-prod', 'Build Mac');
+    });
+  });
+
+  it('persists a local display name for source-only machines', async () => {
+    vi.mocked(commands.listDevices).mockResolvedValue({ status: 'ok', data: [] });
+    vi.mocked(commands.getSources).mockResolvedValue({
+      status: 'ok',
+      data: [{ source: 'remote:ci-runner', clip_count: 9, last_seen: 1_777_614_529 }],
+    });
+
+    render(
+      <MachinesPanel
+        currentDeviceID="local-device"
+        onShowToast={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /customize ci-runner/i }));
+    const input = screen.getByLabelText(/machine display name/i);
+    fireEvent.change(input, { target: { value: 'CI Runner' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(localStorage.getItem('cinch.machineDisplayNames.v1')).toBe(
+      JSON.stringify({ 'remote:ci-runner': 'CI Runner' }),
+    );
+    expect(await screen.findByText('CI Runner')).toBeInTheDocument();
   });
 });

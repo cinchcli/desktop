@@ -7,6 +7,16 @@ import { unwrap } from './lib/tauri';
 import { buildTargets, fuzzySearch, parseFromToken } from './lib/fuzzy';
 import { groupByTimeBucket } from './lib/timeBuckets';
 import { applyClipFilter, type ClipFilter } from './lib/clipFilters';
+import {
+  loadMachineTagColors,
+  MACHINE_TAG_COLORS_EVENT,
+  type MachineTagColorMap,
+} from './lib/machineTagColors';
+import {
+  loadMachineDisplayNames,
+  MACHINE_DISPLAY_NAMES_EVENT,
+  type MachineDisplayNameMap,
+} from './lib/machineDisplayNames';
 import { C } from './design';
 import { useAuthState, retryAuth, signOut, type AuthProgress, type AuthErrorReason } from './lib/state/auth';
 import SettingsPane from './SettingsPane';
@@ -110,6 +120,8 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [devices, setDevices] = useState<Device[]>([]);
+  const [tagColors, setTagColors] = useState<MachineTagColorMap>(() => loadMachineTagColors());
+  const [displayNames, setDisplayNames] = useState<MachineDisplayNameMap>(() => loadMachineDisplayNames());
   const [newSourcePrompt, setNewSourcePrompt] = useState<string | null>(null);
   const [pinNoteDialog, setPinNoteDialog] = useState<{ clip: LocalClip } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -118,6 +130,26 @@ function App() {
   const [activeFilter, setActiveFilter] = useState<ClipFilter>('all');
   const searchRef = useRef<HTMLInputElement>(null);
   const clipListRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const refreshTagColors = () => setTagColors(loadMachineTagColors());
+    window.addEventListener(MACHINE_TAG_COLORS_EVENT, refreshTagColors);
+    window.addEventListener('storage', refreshTagColors);
+    return () => {
+      window.removeEventListener(MACHINE_TAG_COLORS_EVENT, refreshTagColors);
+      window.removeEventListener('storage', refreshTagColors);
+    };
+  }, []);
+
+  useEffect(() => {
+    const refreshDisplayNames = () => setDisplayNames(loadMachineDisplayNames());
+    window.addEventListener(MACHINE_DISPLAY_NAMES_EVENT, refreshDisplayNames);
+    window.addEventListener('storage', refreshDisplayNames);
+    return () => {
+      window.removeEventListener(MACHINE_DISPLAY_NAMES_EVENT, refreshDisplayNames);
+      window.removeEventListener('storage', refreshDisplayNames);
+    };
+  }, []);
   const [toast, setToast] = useState<{ message: string; icon: 'copy' | 'trash' } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -255,22 +287,29 @@ function App() {
   const sourceFilter = useMemo(() => {
     if (!parsed.from) return null;
     const nick = parsed.from.toLowerCase();
+    const localDisplayNameMatch = Object.entries(displayNames).find(
+      ([source, name]) =>
+        name.toLowerCase() === nick ||
+        source.replace(/^remote:/, '').toLowerCase() === nick,
+    );
+    if (localDisplayNameMatch) return localDisplayNameMatch[0];
+
     const matched = devices.find(
       d => (d.nickname?.toLowerCase() === nick) || (d.hostname?.toLowerCase() === nick),
     );
     return matched ? matched.source_key : '__no_match__';
-  }, [parsed.from, devices]);
+  }, [parsed.from, displayNames, devices]);
 
   // Build source -> nickname map for SourcePill and from: filter
   const nicknameBySource = useMemo(() => {
-    const map: Record<string, string> = {};
+    const map: Record<string, string> = { ...displayNames };
     for (const d of devices) {
       if (d.nickname && d.source_key) {
-        map[d.source_key] = d.nickname;
+        map[d.source_key] = displayNames[d.source_key] ?? d.nickname;
       }
     }
     return map;
-  }, [devices]);
+  }, [displayNames, devices]);
 
   const filteredClips = useMemo(() => {
     // 1. Apply source filter (from:<nickname>)
@@ -512,6 +551,7 @@ function App() {
             onDelete={(c) => handleDelete(c.id)}
             query={debouncedQuery}
             deviceNicknames={nicknameBySource}
+            tagColors={tagColors}
             listRef={clipListRef}
           />
         ) : (
@@ -524,6 +564,7 @@ function App() {
               onCopy={copyClip}
               query={debouncedQuery}
               deviceNicknames={nicknameBySource}
+              tagColors={tagColors}
             />
             <ClipDetail
               clip={selectedClip}
@@ -531,6 +572,8 @@ function App() {
               onPin={(c) => c.is_pinned ? handleUnpin(c) : setPinNoteDialog({ clip: c })}
               onDelete={(c) => handleDelete(c.id)}
               searchQuery={debouncedQuery}
+              tagColors={tagColors}
+              sourceDisplayNames={nicknameBySource}
             />
           </>
         )}
@@ -835,7 +878,7 @@ function ShortcutPanel({ onClose }: { onClose: () => void }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {groups.map((g) => (
             <div key={g.title}>
-              <div style={{ fontSize: 10, fontWeight: 600, color: C.t3, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: C.t3, letterSpacing: '0.01em', marginBottom: 8 }}>
                 {g.title}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -926,7 +969,7 @@ function Toast({ message, icon }: { message: string; icon: 'copy' | 'trash' }) {
     gap: 8,
     zIndex: 200,
     pointerEvents: 'none',
-    boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+    boxShadow: '0 4px 20px rgba(10, 8, 5, 0.4)',
     whiteSpace: 'nowrap',
   };
   const textStyle: React.CSSProperties = { fontSize: 12, color: C.t2 };

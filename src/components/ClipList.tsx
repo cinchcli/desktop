@@ -2,7 +2,9 @@ import { forwardRef, type CSSProperties } from 'react';
 import type { LocalClip } from '../bindings';
 import { C, formatTime, formatBytes } from '../design';
 import { groupByTimeBucket } from '../lib/timeBuckets';
+import type { MachineTagColorMap } from '../lib/machineTagColors';
 import { SourcePill } from './SourcePill';
+import { IconPin } from '../icons';
 
 interface ClipListProps {
   clips: LocalClip[];
@@ -11,11 +13,12 @@ interface ClipListProps {
   onCopy: (clip: LocalClip) => void;
   query: string;
   deviceNicknames: Record<string, string>;
+  tagColors?: MachineTagColorMap;
   now?: number;
 }
 
 export const ClipList = forwardRef<HTMLDivElement, ClipListProps>(
-  ({ clips, selected, onSelect, onCopy, query, deviceNicknames, now }, ref) => {
+  ({ clips, selected, onSelect, onCopy, query, deviceNicknames, tagColors = {}, now }, ref) => {
     if (clips.length === 0) {
       return (
         <div style={S.col}>
@@ -46,6 +49,7 @@ export const ClipList = forwardRef<HTMLDivElement, ClipListProps>(
                 onClick={() => onSelect(clip)}
                 onDoubleClick={() => onCopy(clip)}
                 nickname={deviceNicknames[clip.source]}
+                colorSlot={tagColors[clip.source]}
               />
             ))}
           </section>
@@ -63,9 +67,10 @@ interface ClipRowProps {
   onClick: () => void;
   onDoubleClick: () => void;
   nickname?: string;
+  colorSlot?: MachineTagColorMap[string];
 }
 
-function ClipRow({ clip, selected, onClick, onDoubleClick, nickname }: ClipRowProps) {
+function ClipRow({ clip, selected, onClick, onDoubleClick, nickname, colorSlot }: ClipRowProps) {
   const isImage = clip.content_type === 'image' && !!clip.media_path;
   const recency = clip.received_at && clip.received_at > 0 ? clip.received_at : clip.created_at;
   const preview = isImage
@@ -78,6 +83,7 @@ function ClipRow({ clip, selected, onClick, onDoubleClick, nickname }: ClipRowPr
       aria-selected={selected}
       aria-label={preview || 'empty clip'}
       tabIndex={0}
+      className="clip-row"
       style={{ ...S.row, ...(selected ? S.rowActive : {}) }}
       onClick={onClick}
       onKeyDown={(e) => {
@@ -88,12 +94,17 @@ function ClipRow({ clip, selected, onClick, onDoubleClick, nickname }: ClipRowPr
       }}
       onDoubleClick={onDoubleClick}
     >
-      <span style={S.preview}>{preview || ' '}</span>
-      <span style={S.meta}>
-        <SourcePill source={clip.source} status={clip.source === 'local' ? 'local' : 'remote'} nickname={nickname} />
+      <span data-testid="clip-meta" style={S.meta}>
+        <SourcePill source={clip.source} status={clip.source === 'local' ? 'local' : 'remote'} nickname={nickname} colorSlot={colorSlot} />
         <span style={{ color: C.t4 }}>·</span>
         <span>{formatTime(recency)}</span>
+        {clip.is_pinned && (
+          <span data-testid="clip-pin-indicator" style={S.pinIndicator} aria-label="Pinned">
+            <IconPin size={11} />
+          </span>
+        )}
       </span>
+      <span data-testid="clip-preview" style={S.preview}>{preview || ' '}</span>
     </div>
   );
 }
@@ -108,12 +119,11 @@ const S: Record<string, CSSProperties> = {
   },
   sectionLabel: {
     padding: 'var(--sp-md) var(--sp-lg) var(--sp-sm)',
-    fontFamily: 'var(--font-mono)',
+    fontFamily: 'var(--font-body)',
     fontSize: 11,
-    fontWeight: 600,
-    letterSpacing: '0.08em',
-    textTransform: 'uppercase',
-    color: C.t2,
+    fontWeight: 500,
+    letterSpacing: '0.01em',
+    color: C.t3,
   },
   row: {
     padding: 'var(--sp-md) var(--sp-lg)',
@@ -131,11 +141,14 @@ const S: Record<string, CSSProperties> = {
     fontSize: 13.5,
     fontFamily: 'var(--font-body)',
     color: C.t1,
-    whiteSpace: 'nowrap',
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 2,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     letterSpacing: '-0.005em',
     lineHeight: 1.45,
+    wordBreak: 'break-word',
   },
   meta: {
     display: 'flex',
@@ -145,6 +158,12 @@ const S: Record<string, CSSProperties> = {
     fontFamily: 'var(--font-mono)',
     letterSpacing: '0.04em',
     color: C.t3,
+  },
+  pinIndicator: {
+    marginLeft: 'auto',
+    display: 'inline-flex',
+    alignItems: 'center',
+    color: 'var(--accent)',
   },
   empty: {
     padding: '40px var(--sp-xl)',

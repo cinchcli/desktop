@@ -103,4 +103,50 @@ describe('ClipList', () => {
     fireEvent.doubleClick(screen.getByRole('button', { name: /hello world/i }));
     expect(onCopy).toHaveBeenCalledWith(c);
   });
+
+  it('renders meta row (source + time) before the content preview', () => {
+    const c = clip({ id: 'a', content: 'unique-preview-text', source: 'remote:host-x' });
+    render(
+      <ClipList clips={[c]} selected={null} onSelect={() => {}} onCopy={() => {}}
+                query="" deviceNicknames={{ 'remote:host-x': 'host-x' }} now={NOW} />
+    );
+    const row = screen.getByRole('button', { name: /unique-preview-text/i });
+    const meta = row.querySelector('[data-testid="clip-meta"]');
+    const preview = row.querySelector('[data-testid="clip-preview"]');
+    expect(meta).toBeInTheDocument();
+    expect(preview).toBeInTheDocument();
+    // DOM order: meta must come before preview as a sibling
+    const children = Array.from(row.children);
+    expect(children.indexOf(meta as Element)).toBeLessThan(children.indexOf(preview as Element));
+  });
+
+  it('shows a pin indicator when the clip is pinned', () => {
+    const c = clip({ id: 'a', is_pinned: true });
+    render(
+      <ClipList clips={[c]} selected={null} onSelect={() => {}} onCopy={() => {}}
+                query="" deviceNicknames={{}} now={NOW} />
+    );
+    expect(screen.getByTestId('clip-pin-indicator')).toBeInTheDocument();
+  });
+
+  it('hides the pin indicator when the clip is not pinned', () => {
+    const c = clip({ id: 'a', is_pinned: false });
+    render(
+      <ClipList clips={[c]} selected={null} onSelect={() => {}} onCopy={() => {}}
+                query="" deviceNicknames={{}} now={NOW} />
+    );
+    expect(screen.queryByTestId('clip-pin-indicator')).not.toBeInTheDocument();
+  });
+
+  it('preview uses 2-line clamp, not nowrap', () => {
+    const c = clip({ id: 'a', content: 'line content' });
+    render(
+      <ClipList clips={[c]} selected={null} onSelect={() => {}} onCopy={() => {}}
+                query="" deviceNicknames={{}} now={NOW} />
+    );
+    const preview = screen.getByTestId('clip-preview');
+    const styleAttr = preview.getAttribute('style') || '';
+    expect(styleAttr).toMatch(/-webkit-line-clamp:\s*2/);
+    expect(styleAttr).not.toMatch(/white-space:\s*nowrap/);
+  });
 });
