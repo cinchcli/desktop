@@ -12,6 +12,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate sibling pin files
+        # Cheap format check on every PR. The full sibling-HEAD comparison
+        # runs in desktop-release.yml after the cinch + relay clones.
+        run: |
+          for f in .cinch-ref .relay-ref; do
+            if [ ! -f "$f" ]; then
+              echo "::error::missing pin file: $f" >&2
+              exit 1
+            fi
+            ref=$(tr -d '[:space:]' < "$f")
+            if [[ ! "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::$f must contain a 40-char git sha, got: '$ref'" >&2
+              exit 1
+            fi
+            echo "$f = $ref"
+          done
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:

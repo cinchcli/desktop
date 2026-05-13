@@ -70,11 +70,20 @@ jobs:
       - name: Install protobuf compiler
         run: brew install protobuf
 
-      - name: Checkout cinch sibling (path-dep)
-        run: git clone https://x-access-token:${{ secrets.CINCH_READ_PAT }}@github.com/cinchcli/cinch.git ../cinch
+      - name: Checkout cinch sibling at pinned ref
+        run: |
+          ref=$(tr -d '[:space:]' < .cinch-ref)
+          git clone https://x-access-token:${{ secrets.CINCH_READ_PAT }}@github.com/cinchcli/cinch.git ../cinch
+          git -C ../cinch checkout "$ref"
 
-      - name: Checkout relay sibling (proto-cinch build.rs)
-        run: git clone https://x-access-token:${{ secrets.CINCH_READ_PAT }}@github.com/cinchcli/relay.git ../relay
+      - name: Checkout relay sibling at pinned ref
+        run: |
+          ref=$(tr -d '[:space:]' < .relay-ref)
+          git clone https://x-access-token:${{ secrets.CINCH_READ_PAT }}@github.com/cinchcli/relay.git ../relay
+          git -C ../relay checkout "$ref"
+
+      - name: Verify sibling pins
+        run: bash scripts/check-sibling-pins.sh
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2

@@ -1,6 +1,5 @@
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info, warn};
-use reqwest;
 use serde_json;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -850,6 +849,25 @@ pub(crate) fn encrypt_or_drop(
         })
 }
 
+/// Build the typed `PushRequest` the relay expects from an offline-queued clip
+/// plus its encrypted payload. Pulled out as a pure function so the wire
+/// contract can be unit-tested without spinning up a relay or app handle.
+pub(crate) fn build_push_request(
+    clip: &LocalClip,
+    payload: EncryptedPayload,
+) -> client_core::rest::PushRequest {
+    client_core::rest::PushRequest {
+        content: payload.body,
+        content_type: clip.content_type.clone(),
+        label: clip.label.clone(),
+        source: clip.source.clone(),
+        media_path: clip.media_path.clone(),
+        byte_size: clip.byte_size,
+        encrypted: payload.encrypted,
+        target_device_id: None,
+    }
+}
+
 #[cfg(test)]
 pub(crate) use encrypt_or_drop as encrypt_or_drop_for_test;
 
@@ -876,9 +894,6 @@ async fn flush_offline_queue(app: &AppHandle, db: &Database) {
         }
     };
 
-    let relay_url = &config.relay_url;
-    let token = &config.token;
-
     let enc_key: Option<[u8; 32]> = client_core::credstore::read_encryption_key(&config.user_id);
 
     if enc_key.is_none() {
@@ -897,10 +912,15 @@ async fn flush_offline_queue(app: &AppHandle, db: &Database) {
         return;
     }
 
-    let client = reqwest::Client::new();
-    for clip in &unsynced {
-        let push_url = format!("{}/clips", relay_url);
+    let client = match client_core::http::RestClient::new(&config.relay_url, &config.token) {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("offline flush: rest client build failed: {}", e);
+            return;
+        }
+    };
 
+    for clip in &unsynced {
         let payload = match encrypt_or_drop(enc_key.as_ref(), clip.content.as_bytes()) {
             Some(p) => p,
             None => {
@@ -910,37 +930,17 @@ async fn flush_offline_queue(app: &AppHandle, db: &Database) {
             }
         };
 
-        let body = serde_json::json!({
-            "content": payload.body,
-            "content_type": clip.content_type,
-            "source": clip.source,
-            "label": clip.label,
-            "encrypted": payload.encrypted,
-        });
+        let req = build_push_request(clip, payload);
 
-        match client
-            .post(&push_url)
-            .bearer_auth(token)
-            .json(&body)
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => {
+        match client.push_clip_json(&req).await {
+            Ok(_) => {
                 if let Err(e) = db.mark_synced(&clip.id) {
                     warn!("offline flush: mark_synced failed for {}: {}", clip.id, e);
                 }
             }
-            Ok(resp) => {
-                warn!(
-                    "offline flush: relay returned {} for clip {}",
-                    resp.status(),
-                    clip.id
-                );
-                break; // stop on first failure, retry on next reconnect
-            }
             Err(e) => {
-                warn!("offline flush: request failed for {}: {}", clip.id, e);
-                break; // stop on first failure
+                warn!("offline flush: push failed for {}: {}", clip.id, e);
+                break; // stop on first failure, retry on next reconnect
             }
         }
     }
