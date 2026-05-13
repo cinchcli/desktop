@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { LogicalSize } from '@tauri-apps/api/dpi';
+import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import { commands, events } from './bindings';
 import type { LocalClip, SourceInfo, Device } from './bindings';
 import { unwrap } from './lib/tauri';
@@ -112,6 +113,31 @@ function App() {
     });
     return () => { unsubP.then((f) => f()); };
   }, []);
+
+  // OS notification when a remote login request arrives (device_code_pending).
+  useEffect(() => {
+    let cancelled = false;
+    let unsub: (() => void) | null = null;
+    (async () => {
+      let granted = await isPermissionGranted();
+      if (!granted) {
+        const result = await requestPermission();
+        granted = result === 'granted';
+      }
+      if (cancelled) return;
+      unsub = await events.deviceCodePending.listen((e) => {
+        const p = e.payload;
+        if (granted) {
+          sendNotification({
+            title: 'Approve remote login?',
+            body: `From ${p.hostname}${p.source_region ? ` (${p.source_region})` : ''}\nCode: ${p.user_code}`,
+          });
+        }
+      });
+    })();
+    return () => { cancelled = true; unsub?.(); };
+  }, []);
+
   const [_status, setStatus] = useState('connecting');
   const [clips, setClips] = useState<LocalClip[]>([]);
   const [sources, setSources] = useState<SourceInfo[]>([]);

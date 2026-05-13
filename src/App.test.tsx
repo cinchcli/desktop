@@ -15,6 +15,11 @@ vi.mock('./lib/state/auth', () => ({
 }));
 
 // Mock Tauri APIs that are not available in the jsdom test environment.
+vi.mock('@tauri-apps/plugin-notification', () => ({
+    isPermissionGranted: vi.fn(() => Promise.resolve(true)),
+    requestPermission: vi.fn(() => Promise.resolve('granted')),
+    sendNotification: vi.fn(),
+}));
 vi.mock('@tauri-apps/api/core', () => ({
     invoke: vi.fn((cmd) => {
         if (cmd === 'list_clips' || cmd === 'list_pinned_clips' || cmd === 'get_sources' || cmd === 'list_devices') {
