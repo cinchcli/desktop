@@ -635,7 +635,7 @@ dependencies = [
 
 [[package]]
 name = "cinch-desktop"
-version = "0.1.3"
+version = "0.1.5"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
