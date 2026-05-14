@@ -22,6 +22,14 @@ use auth::state::PendingCodesHandle;
 use auth::{AuthState, AuthStateHandle};
 use protocol::MultiConfigHandle;
 
+/// Handle to the shared `client_core` store (new Phase 4 store).
+/// Commands that need to read/write the new store access this via Tauri state.
+pub type SharedStore = Arc<client_core::store::Store>;
+
+/// The long-lived sync writer started at startup.  Wrapped in `Mutex<Option<…>>`
+/// so the shutdown path can `take()` it and call `Writer::shutdown`.
+pub type WriterHandle = Mutex<Option<client_core::sync::Writer>>;
+
 pub type PreviousAppPid = Arc<Mutex<Option<i32>>>;
 
 pub fn make_specta_builder() -> Builder<tauri::Wry> {
@@ -123,6 +131,88 @@ pub fn run() {
     let token_for_delta = config.token.clone();
     let config_for_auth_seed = config.clone();
 
+    // ── Phase 4: open shared client-core Store at ~/.cinch/store.db ──────────
+    // This is the unified store shared between the desktop and the CLI writer.
+    // The legacy com.cinch.app/clips.db remains in use by existing commands
+    // (Task 4.2 will migrate those commands to use this store directly).
+    let shared_store: SharedStore = match client_core::store::default_db_path() {
+        Ok(path) => match client_core::store::Store::open(&path) {
+            Ok(s) => {
+                info!("client-core store opened at {}", path.display());
+                Arc::new(s)
+            }
+            Err(e) => {
+                log::warn!("client-core store open failed (non-fatal): {}", e);
+                // Construct an in-memory fallback so the app still starts.
+                Arc::new(
+                    client_core::store::Store::open(std::path::Path::new(":memory:"))
+                        .expect("in-memory store"),
+                )
+            }
+        },
+        Err(e) => {
+            log::warn!("cannot resolve store path (non-fatal): {}", e);
+            Arc::new(
+                client_core::store::Store::open(std::path::Path::new(":memory:"))
+                    .expect("in-memory store"),
+            )
+        }
+    };
+
+    // ── Phase 4: build WsConfig and start sync::Writer ───────────────────────
+    // We do this in the outer run() scope (before Tauri's setup hook) so the
+    // writer is started exactly once at launch with the credentials that were
+    // live at startup.  The writer handle is moved into managed state so Tauri
+    // keeps it alive for the full process lifetime.
+    let writer_handle: WriterHandle = {
+        if is_configured && !config.token.is_empty() && !config.relay_url.is_empty() {
+            let enc_key = client_core::credstore::read_encryption_key(&config.user_id);
+            let ws_cfg = client_core::ws::WsConfig {
+                relay_url: config.relay_url.clone(),
+                token: config.token.clone(),
+                encryption_key: enc_key,
+            };
+            match client_core::http::RestClient::new(
+                config.relay_url.clone(),
+                config.token.clone(),
+            ) {
+                Ok(rest_client) => {
+                    let rest_arc = Arc::new(rest_client);
+                    let store_for_writer = shared_store.clone();
+                    let lock_p = client_core::store::lock_path()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/cinch.lock"));
+                    match tauri::async_runtime::block_on(client_core::sync::Writer::start(
+                        store_for_writer,
+                        rest_arc,
+                        ws_cfg,
+                        lock_p,
+                        client_core::sync::LockKind::Desktop,
+                    )) {
+                        Ok(Some(w)) => {
+                            info!("client-core sync::Writer started");
+                            Mutex::new(Some(w))
+                        }
+                        Ok(None) => {
+                            log::warn!("sync::Writer: lock held by another process, skipping");
+                            Mutex::new(None)
+                        }
+                        Err(e) => {
+                            log::warn!("sync::Writer::start failed (non-fatal): {}", e);
+                            Mutex::new(None)
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("cannot build RestClient for Writer (non-fatal): {}", e);
+                    Mutex::new(None)
+                }
+            }
+        } else {
+            // Not yet configured — no writer until auth completes.
+            Mutex::new(None)
+        }
+    };
+
     let multi_config_handle: MultiConfigHandle = Arc::new(Mutex::new(multi_config));
     let ws_abort_handle = Arc::new(ws::WsAbortHandle::new());
     let pending_relay_add = Arc::new(commands::relays::PendingRelayAdd::new());
@@ -220,6 +310,9 @@ pub fn run() {
         .manage(auth_state_handle.clone())
         .manage(pending_codes_handle.clone())
         .manage(previous_app_pid.clone())
+        // Phase 4: shared client-core Store and sync Writer
+        .manage(shared_store)
+        .manage(writer_handle)
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
@@ -480,23 +573,13 @@ pub fn run() {
                     }
                 });
 
-                // Spawn WebSocket client
-                let ws_auth_handle: AuthStateHandle =
-                    app.state::<AuthStateHandle>().inner().clone();
-                let ws_pending_handle: PendingCodesHandle =
-                    app.state::<PendingCodesHandle>().inner().clone();
-                let join = ws::spawn_ws_client(
-                    handle,
-                    ws_relay_url.clone(),
-                    ws_token.clone(),
-                    db.clone(),
-                    clipboard_service.clone(),
-                    ws_status.clone(),
-                    ws_auth_handle,
-                    relay_connected.clone(),
-                    ws_pending_handle,
-                );
-                ws_abort_handle.replace(join);
+                // Phase 4: the legacy ws::spawn_ws_client call is replaced by
+                // the client_core::sync::Writer started above (before the Tauri
+                // builder).  The Writer manages its own WS reconnect loop and
+                // writes incoming clips to the shared client-core Store.
+                // Task 4.3 will delete ws.rs entirely once commands/clips.rs
+                // is migrated to the new store (Task 4.2).
+                let _ = (ws_relay_url, ws_token); // consumed by Writer above
             } else {
                 // No config — show window immediately with setup instructions
                 show_on_active_monitor(handle);
