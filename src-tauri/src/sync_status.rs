@@ -12,6 +12,7 @@
 //! `EncryptedPayload`, `encrypt_or_drop`, `build_push_request` — offline-queue
 //!   helpers used by the clipboard monitor and the offline flush path.
 
+#[cfg(test)]
 use crate::store::models::LocalClip;
 
 // ---------------------------------------------------------------------------
@@ -69,9 +70,15 @@ impl WsAbortHandle {
 }
 
 // ---------------------------------------------------------------------------
-// Offline-queue helpers
+// Offline-queue helpers (test-only)
+//
+// Pure wire-contract helpers retained so the offline-queue path can be
+// unit-tested without a relay or app handle.  Production code drives the
+// same path through `client_core::sync::Writer`; if those helpers are wired
+// back into the monitor, drop the `cfg(test)` gates.
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
 pub(crate) struct EncryptedPayload {
     pub body: String,
     pub encrypted: bool,
@@ -79,6 +86,7 @@ pub(crate) struct EncryptedPayload {
 
 /// Encrypt `plaintext` with `key`, returning `Some(EncryptedPayload)` on success
 /// or `None` if no key is available (drops the clip from the queue).
+#[cfg(test)]
 pub(crate) fn encrypt_or_drop(
     key: Option<&[u8; 32]>,
     plaintext: &[u8],
@@ -95,6 +103,7 @@ pub(crate) fn encrypt_or_drop(
 /// Build the typed `PushRequest` the relay expects from an offline-queued clip
 /// plus its encrypted payload.  Pulled out as a pure function so the wire
 /// contract can be unit-tested without spinning up a relay or app handle.
+#[cfg(test)]
 pub(crate) fn build_push_request(
     clip: &LocalClip,
     payload: EncryptedPayload,

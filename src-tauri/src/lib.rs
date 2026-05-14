@@ -294,7 +294,6 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .manage(Mutex::new(tray::TrayState::new()))
         .manage(db.clone())
         .manage(multi_config_handle.clone())
         .manage(ws_abort_handle.clone())

@@ -104,15 +104,6 @@ impl ClipboardService {
         inner.backend.read_snapshot().ok().and_then(|s| s.token)
     }
 
-    /// Has the clipboard changed since `prior`? `None` on either side means
-    /// "unknown" and is treated as changed (conservative).
-    pub fn has_changed_since(&self, prior: Option<u64>) -> bool {
-        match (self.token(), prior) {
-            (Some(cur), Some(p)) => cur != p,
-            _ => true,
-        }
-    }
-
     pub fn default_excluded_apps(&self) -> Vec<String> {
         let inner = self.inner.lock().expect("clipboard mutex poisoned");
         inner.backend.default_excluded_apps()
