@@ -191,9 +191,9 @@ fn handle_text_clip(
             error!("enforce_offline_cap failed: {}", e);
         }
     }
-    crate::events::ClipReceived(
-        crate::commands::clips::LocalClip::from_legacy(local_clip.clone()),
-    )
+    crate::events::ClipReceived(crate::commands::clips::LocalClip::from_legacy(
+        local_clip.clone(),
+    ))
     .emit(app)
     .ok();
     info!(
@@ -288,9 +288,9 @@ fn handle_image_clip(
             error!("enforce_offline_cap failed: {}", e);
         }
     }
-    crate::events::ClipReceived(
-        crate::commands::clips::LocalClip::from_legacy(local_clip.clone()),
-    )
+    crate::events::ClipReceived(crate::commands::clips::LocalClip::from_legacy(
+        local_clip.clone(),
+    ))
     .emit(app)
     .ok();
     info!(

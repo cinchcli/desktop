@@ -6,8 +6,8 @@ pub mod crypto;
 pub mod events;
 pub mod protocol;
 mod store;
-mod tray;
 mod sync_status;
+mod tray;
 
 #[cfg(test)]
 mod tests;
