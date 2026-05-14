@@ -340,11 +340,11 @@ html.light {
   background: var(--hover);
 }
 
-/* Machines panel action buttons */
-.machines-btn {
+/* Devices panel action buttons */
+.devices-btn {
   transition: background 100ms ease, border-color 100ms ease, color 100ms ease;
 }
-.machines-btn:hover {
+.devices-btn:hover {
   background: var(--hover);
   border-color: var(--border-hover);
   color: var(--text-primary);

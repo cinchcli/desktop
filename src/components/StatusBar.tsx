@@ -3,16 +3,16 @@ import { C } from '../design';
 
 interface StatusBarProps {
   clipCount: number;
-  machinesOnline?: number;
-  machinesTotal?: number;
+  devicesOnline?: number;
+  devicesTotal?: number;
   hints: { keys: string; label: string }[];
   onMouseDown?: (e: React.MouseEvent) => void;
 }
 
 export function StatusBar({
   clipCount,
-  machinesOnline,
-  machinesTotal,
+  devicesOnline,
+  devicesTotal,
   hints,
   onMouseDown,
 }: StatusBarProps) {
@@ -20,10 +20,10 @@ export function StatusBar({
     <footer style={S.bar} role="contentinfo" onMouseDown={onMouseDown}>
       <div style={S.left}>
         <span>{clipCount} {clipCount === 1 ? 'clip' : 'clips'}</span>
-        {machinesTotal !== undefined && (
+        {devicesTotal !== undefined && (
           <>
             <span style={{ color: C.t4 }}>·</span>
-            <span>{machinesOnline ?? 0}/{machinesTotal} online</span>
+            <span>{devicesOnline ?? 0}/{devicesTotal} online</span>
           </>
         )}
       </div>
