@@ -11,7 +11,7 @@ use crate::auth::{
 };
 use crate::commands::relays::{PendingAuthRelay, PendingRelayAdd};
 use crate::protocol::MultiConfigHandle;
-use crate::ws::{WsAbortHandle, WsStatus};
+use crate::sync_status::{WsAbortHandle, WsStatus};
 
 /// Returns the current AuthState. Used by AuthProvider's initial fetch in React.
 #[tauri::command]
@@ -54,14 +54,6 @@ pub fn sign_in(
     let provider2 = provider;
     let hostname2 = hostname.clone();
     let mc: MultiConfigHandle = app.state::<MultiConfigHandle>().inner().clone();
-    let db = app
-        .state::<Arc<crate::store::db::Database>>()
-        .inner()
-        .clone();
-    let clipboard = app
-        .state::<Arc<crate::clipboard::ClipboardService>>()
-        .inner()
-        .clone();
     let ws_status = app.state::<Arc<WsStatus>>().inner().clone();
     let relay_connected = app
         .state::<Arc<std::sync::atomic::AtomicBool>>()
@@ -282,22 +274,28 @@ pub fn sign_in(
                     .await;
             });
 
-            let pending_codes2: crate::auth::state::PendingCodesHandle = app2
-                .state::<crate::auth::state::PendingCodesHandle>()
-                .inner()
-                .clone();
-            let jh = crate::ws::spawn_ws_client(
-                &app2,
-                relay2.clone(),
-                token.clone(),
-                db,
-                clipboard,
-                ws_status,
-                handle2,
-                relay_connected,
-                pending_codes2,
-            );
-            ws_abort.replace(jh);
+            // Restart the client-core Writer with the new credentials.
+            {
+                let app3 = app2.clone();
+                let rw_relay = relay2.clone();
+                let rw_token = token.clone();
+                let rw_ws_status = ws_status.clone();
+                let rw_relay_connected = relay_connected.clone();
+                let jh = tauri::async_runtime::spawn(async move {
+                    if let Err(e) = crate::restart_writer(
+                        &app3,
+                        &rw_relay,
+                        &rw_token,
+                        &rw_ws_status,
+                        &rw_relay_connected,
+                    )
+                    .await
+                    {
+                        log::error!("sign_in: restart_writer failed: {}", e);
+                    }
+                });
+                ws_abort.replace(jh);
+            }
 
             // I1: Clear pending state — login completed via polling, deep-link no longer needed.
             pending_auth_relay.clear();
@@ -480,24 +478,30 @@ pub async fn handle_deeplink(
         });
     }
 
-    // Spawn WS client
-    let db: State<'_, Arc<crate::store::db::Database>> = app.state();
-    let clipboard: State<'_, Arc<crate::clipboard::ClipboardService>> = app.state();
-    let ws_status: State<'_, Arc<WsStatus>> = app.state();
-    let relay_connected: State<'_, Arc<std::sync::atomic::AtomicBool>> = app.state();
-    let pending_codes: State<'_, crate::auth::state::PendingCodesHandle> = app.state();
-    let join_handle = crate::ws::spawn_ws_client(
-        &app,
-        relay_url.clone(),
-        token.clone(),
-        db.inner().clone(),
-        clipboard.inner().clone(),
-        ws_status.inner().clone(),
-        handle.inner().clone(),
-        relay_connected.inner().clone(),
-        pending_codes.inner().clone(),
-    );
-    ws_abort.replace(join_handle);
+    // Restart the client-core Writer with the new credentials.
+    {
+        let ws_status: State<'_, Arc<WsStatus>> = app.state();
+        let relay_connected: State<'_, Arc<std::sync::atomic::AtomicBool>> = app.state();
+        let rw_relay = relay_url.clone();
+        let rw_token = token.clone();
+        let rw_ws_status = ws_status.inner().clone();
+        let rw_relay_connected = relay_connected.inner().clone();
+        let app2 = app.clone();
+        let jh = tauri::async_runtime::spawn(async move {
+            if let Err(e) = crate::restart_writer(
+                &app2,
+                &rw_relay,
+                &rw_token,
+                &rw_ws_status,
+                &rw_relay_connected,
+            )
+            .await
+            {
+                log::error!("handle_deeplink: restart_writer failed: {}", e);
+            }
+        });
+        ws_abort.replace(jh);
+    }
 
     log::info!(
         "handle_deeplink auth complete: user={}, device={}, relay_id={}",

@@ -5,11 +5,11 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::auth::{add_relay_profile, load_multi_config, transition, AuthState, AuthStateHandle};
 use crate::protocol::MultiConfigHandle;
-use crate::ws::{WsAbortHandle, WsStatus};
+use crate::sync_status::{WsAbortHandle, WsStatus};
 
 // ─── PendingAuthRelay ────────────────────────────────────────────────────────
 
@@ -85,7 +85,6 @@ pub struct PairWithTokenResult {
 /// Clears any existing relay and replaces it with the new one.
 #[tauri::command]
 #[specta::specta]
-#[allow(clippy::too_many_arguments)]
 pub async fn pair_with_token(
     app: AppHandle,
     mc: State<'_, MultiConfigHandle>,
@@ -93,8 +92,6 @@ pub async fn pair_with_token(
     ws_status: State<'_, Arc<WsStatus>>,
     auth_handle: State<'_, AuthStateHandle>,
     relay_connected: State<'_, Arc<std::sync::atomic::AtomicBool>>,
-    db: State<'_, Arc<crate::store::db::Database>>,
-    clipboard: State<'_, Arc<crate::clipboard::ClipboardService>>,
     req: PairWithTokenRequest,
 ) -> Result<PairWithTokenResult, String> {
     let relay = req.relay_url.trim().trim_end_matches('/').to_string();
@@ -226,19 +223,28 @@ pub async fn pair_with_token(
         });
     }
 
-    let pending_codes: tauri::State<'_, crate::auth::state::PendingCodesHandle> = app.state();
-    let handle = crate::ws::spawn_ws_client(
-        &app,
-        ws_relay_url,
-        ws_token,
-        db.inner().clone(),
-        clipboard.inner().clone(),
-        ws_status.inner().clone(),
-        auth_handle.inner().clone(),
-        relay_connected.inner().clone(),
-        pending_codes.inner().clone(),
-    );
-    ws_abort.replace(handle);
+    // Restart the client-core Writer with the new credentials.
+    {
+        let rw_relay = ws_relay_url.clone();
+        let rw_token = ws_token.clone();
+        let rw_ws_status = ws_status.inner().clone();
+        let rw_relay_connected = relay_connected.inner().clone();
+        let app2 = app.clone();
+        let jh = tauri::async_runtime::spawn(async move {
+            if let Err(e) = crate::restart_writer(
+                &app2,
+                &rw_relay,
+                &rw_token,
+                &rw_ws_status,
+                &rw_relay_connected,
+            )
+            .await
+            {
+                log::error!("pair_with_token: restart_writer failed: {}", e);
+            }
+        });
+        ws_abort.replace(jh);
+    }
 
     Ok(PairWithTokenResult {
         relay_id,

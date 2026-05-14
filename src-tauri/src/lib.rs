@@ -7,7 +7,7 @@ pub mod events;
 pub mod protocol;
 mod store;
 mod tray;
-mod ws;
+mod sync_status;
 
 #[cfg(test)]
 mod tests;
@@ -210,7 +210,7 @@ pub fn run() {
     };
 
     let multi_config_handle: MultiConfigHandle = Arc::new(Mutex::new(multi_config));
-    let ws_abort_handle = Arc::new(ws::WsAbortHandle::new());
+    let ws_abort_handle = Arc::new(sync_status::WsAbortHandle::new());
     let pending_relay_add = Arc::new(commands::relays::PendingRelayAdd::new());
     let pending_auth_relay = Arc::new(commands::relays::PendingAuthRelay::new());
     let previous_app_pid: PreviousAppPid = Arc::new(Mutex::new(None));
@@ -218,7 +218,7 @@ pub fn run() {
     // Single clipboard service shared by monitor, ws client, and Tauri commands.
     let clipboard_service = Arc::new(clipboard::ClipboardService::new_platform_default());
 
-    let ws_status = Arc::new(ws::WsStatus::new());
+    let ws_status = Arc::new(sync_status::WsStatus::new());
 
     // Shared relay connectivity flag for offline queue logic
     let relay_connected = Arc::new(AtomicBool::new(false));
@@ -360,16 +360,13 @@ pub fn run() {
                 use tauri_plugin_deep_link::DeepLinkExt;
 
                 let dl_auth_handle = auth_state_handle.clone();
-                let dl_db = db.clone();
                 let dl_app_handle = app.handle().clone();
-                let dl_clipboard = clipboard_service.clone();
                 let dl_ws_status = ws_status.clone();
                 let dl_relay_connected = relay_connected.clone();
                 let dl_mc = multi_config_handle.clone();
                 let dl_ws_abort = ws_abort_handle.clone();
                 let dl_pending = pending_relay_add.clone();
                 let dl_pending_auth = pending_auth_relay.clone();
-                let dl_pending_codes = pending_codes_handle.clone();
                 app.deep_link().on_open_url(move |event| {
                     let urls = event.urls();
                     for url in &urls {
@@ -521,18 +518,26 @@ pub fn run() {
                                 },
                             );
 
-                            let join_handle = ws::spawn_ws_client(
-                                &dl_app_handle,
-                                relay.clone(),
-                                token.clone(),
-                                dl_db.clone(),
-                                dl_clipboard.clone(),
-                                dl_ws_status.clone(),
-                                dl_auth_handle.clone(),
-                                dl_relay_connected.clone(),
-                                dl_pending_codes.clone(),
-                            );
-                            dl_ws_abort.replace(join_handle);
+                            // Restart the client-core Writer with the new credentials.
+                            let app_for_writer = dl_app_handle.clone();
+                            let writer_relay = relay.clone();
+                            let writer_token = token.clone();
+                            let dl_ws_status2 = dl_ws_status.clone();
+                            let dl_relay_connected2 = dl_relay_connected.clone();
+                            let jh = tauri::async_runtime::spawn(async move {
+                                if let Err(e) = restart_writer(
+                                    &app_for_writer,
+                                    &writer_relay,
+                                    &writer_token,
+                                    &dl_ws_status2,
+                                    &dl_relay_connected2,
+                                )
+                                .await
+                                {
+                                    log::error!("deep-link: restart_writer failed: {}", e);
+                                }
+                            });
+                            dl_ws_abort.replace(jh);
 
                             log::info!(
                                 "deep-link auth complete: user={}, device={}, relay_id={}",
@@ -896,3 +901,90 @@ pub(crate) fn sanitize_media_path(media_path: &str) -> Result<std::path::PathBuf
 // Backfill into the shared client-core store is now handled exclusively by
 // client_core::sync::Writer (started at app launch in run()). The legacy
 // com.cinch.app/clips.db no longer receives startup syncs.
+
+/// Replace the active `client_core::sync::Writer` with a fresh one built from
+/// new credentials.  Called from the deep-link auth-callback handler (and from
+/// `commands/auth.rs` / `commands/relays.rs`) after a fresh sign-in so the
+/// writer reconnects to the relay with the updated token.
+///
+/// Shuts down the previous writer (releasing the lock) before starting the
+/// new one.  There is a brief window between the two where no writer holds the
+/// lock; that is acceptable — a second desktop instance that swoops in will
+/// simply become writer and the first will fall back to reader on next start.
+pub(crate) async fn restart_writer(
+    app: &tauri::AppHandle,
+    relay_url: &str,
+    token: &str,
+    ws_status: &std::sync::Arc<sync_status::WsStatus>,
+    relay_connected: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    use tauri::Manager;
+
+    // Resolve the user_id for the encryption key lookup.
+    let user_id = {
+        let mc = app.state::<crate::protocol::MultiConfigHandle>();
+        let guard = mc.lock().unwrap();
+        let id = guard
+            .active_profile()
+            .map(|p| p.user_id.clone())
+            .unwrap_or_default();
+        id
+    };
+
+    let enc_key = client_core::credstore::read_encryption_key(&user_id);
+    let ws_cfg = client_core::ws::WsConfig {
+        relay_url: relay_url.to_string(),
+        token: token.to_string(),
+        encryption_key: enc_key,
+    };
+
+    let rest = client_core::http::RestClient::new(relay_url.to_string(), token.to_string())
+        .map_err(|e| e.to_string())?;
+    let rest_arc = std::sync::Arc::new(rest);
+
+    let store: crate::SharedStore = app.state::<crate::SharedStore>().inner().clone();
+    let lock_path = client_core::store::lock_path()
+        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/cinch.lock"));
+
+    // Shut down the old writer first so it releases the lockfile.
+    // Take the Writer out while holding the lock, then drop the lock before
+    // calling shutdown().await — std::sync::MutexGuard is not Send and must
+    // not be held across an await point.
+    let old_writer = {
+        let writer_handle = app.state::<crate::WriterHandle>();
+        let mut guard = writer_handle.lock().map_err(|e| e.to_string())?;
+        guard.take()
+    };
+    if let Some(w) = old_writer {
+        w.shutdown().await;
+    }
+
+    ws_status.set("connecting");
+    relay_connected.store(false, Ordering::Relaxed);
+
+    match client_core::sync::Writer::start(
+        store,
+        rest_arc,
+        ws_cfg,
+        lock_path,
+        client_core::sync::LockKind::Desktop,
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    {
+        Some(new_writer) => {
+            let writer_handle = app.state::<crate::WriterHandle>();
+            let mut guard = writer_handle.lock().map_err(|e| e.to_string())?;
+            *guard = Some(new_writer);
+            ws_status.set("connected");
+            relay_connected.store(true, Ordering::Relaxed);
+            log::info!("restart_writer: new Writer started for relay={}", relay_url);
+        }
+        None => {
+            log::warn!("restart_writer: lock held by another process — running as reader");
+        }
+    }
+
+    Ok(())
+}
