@@ -1,5 +1,5 @@
 use log::info;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -248,6 +248,7 @@ impl Database {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn list_clips(
         &self,
         source_filter: Option<&str>,
@@ -306,6 +307,7 @@ impl Database {
         Ok(clips)
     }
 
+    #[cfg(test)]
     pub fn list_pinned_clips(&self) -> Result<Vec<LocalClip>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
@@ -340,6 +342,7 @@ impl Database {
         Ok(clips)
     }
 
+    #[cfg(test)]
     pub fn pin_clip(&self, id: &str, note: Option<&str>) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -350,16 +353,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn unpin_clip(&self, id: &str) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE clips SET is_pinned = 0, pin_note = NULL WHERE id = ?1",
-            params![id],
-        )
-        .map_err(|e| format!("unpin_clip failed: {}", e))?;
-        Ok(())
-    }
-
+    #[cfg(test)]
     pub fn search_clips(&self, query: &str, limit: i64) -> Result<Vec<LocalClip>, String> {
         if query.trim().is_empty() {
             return self.list_clips(None, None, limit);
@@ -407,6 +401,7 @@ impl Database {
         Ok(clips)
     }
 
+    #[cfg(test)]
     pub fn get_sources(&self) -> Result<Vec<SourceInfo>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
@@ -433,6 +428,7 @@ impl Database {
         Ok(sources)
     }
 
+    #[cfg(test)]
     pub fn delete_clip(&self, id: &str) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
 
@@ -562,6 +558,7 @@ impl Database {
 
     /// Returns all clips with `synced = false`, ordered by `created_at ASC` (oldest first).
     /// Used by the offline push queue to flush pending clips on reconnect.
+    #[cfg(test)]
     pub fn list_unsynced_clips(&self) -> Result<Vec<LocalClip>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
@@ -597,6 +594,7 @@ impl Database {
     }
 
     /// Mark a clip as synced after successful push to relay.
+    #[cfg(test)]
     pub fn mark_synced(&self, clip_id: &str) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -605,40 +603,6 @@ impl Database {
         )
         .map_err(|e| format!("mark_synced failed: {}", e))?;
         Ok(())
-    }
-
-    /// When the relay echoes back a locally-captured text clip, replace the
-    /// local ULID with the relay-assigned ID so that relay-driven deletions
-    /// can resolve the clip. Matches by content against the most recent local
-    /// clip. Returns `true` if a match was found and updated.
-    pub fn merge_local_clip_to_relay_id(
-        &self,
-        relay_id: &str,
-        content: &str,
-    ) -> Result<bool, String> {
-        let conn = self.conn.lock().unwrap();
-        let old_id: Option<String> = conn
-            .query_row(
-                "SELECT id FROM clips WHERE content = ?1 AND source = 'local' \
-                 ORDER BY created_at DESC LIMIT 1",
-                params![content],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|e| format!("merge_local_clip_to_relay_id lookup failed: {}", e))?;
-
-        match old_id {
-            Some(ref oid) if oid != relay_id => {
-                conn.execute(
-                    "UPDATE clips SET id = ?1 WHERE id = ?2",
-                    params![relay_id, oid],
-                )
-                .map_err(|e| format!("merge_local_clip_to_relay_id update failed: {}", e))?;
-                Ok(true)
-            }
-            Some(_) => Ok(false), // relay_id already matches — no-op
-            None => Ok(false),
-        }
     }
 
     /// Enforce the offline queue cap by dropping the oldest unsynced clips
@@ -677,23 +641,11 @@ impl Database {
         Ok(excess)
     }
 
+    #[cfg(test)]
     pub fn clip_count(&self) -> Result<i64, String> {
         let conn = self.conn.lock().unwrap();
         conn.query_row("SELECT COUNT(*) FROM clips", [], |row| row.get(0))
             .map_err(|e| format!("count failed: {}", e))
-    }
-
-    /// Returns the maximum `created_at` timestamp across all stored clips, or
-    /// `None` if the table is empty. Used as the delta-sync watermark: because
-    /// `created_at` is copied verbatim from the relay's `created_at` field, it
-    /// lives in the same clock domain as the relay's `ListClipsSince` filter,
-    /// avoiding the skew that would occur if we used the desktop's local
-    /// `received_at` wall-clock instead.
-    pub fn max_created_at(&self) -> Result<Option<i64>, String> {
-        let conn = self.conn.lock().unwrap();
-        let result: rusqlite::Result<Option<i64>> =
-            conn.query_row("SELECT MAX(created_at) FROM clips", [], |row| row.get(0));
-        result.map_err(|e| format!("max_created_at: {}", e))
     }
 
     // --- Settings ---
@@ -749,6 +701,7 @@ impl Database {
     }
 
     /// Returns true if this source has never had an auto_copy setting saved.
+    #[cfg(test)]
     pub fn is_source_new(&self, source: &str) -> Result<bool, String> {
         let key = format!("auto_copy:{}", source);
         Ok(self.get_setting(&key)?.is_none())
@@ -818,6 +771,7 @@ impl Database {
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct SourceInfo {
     pub source: String,
