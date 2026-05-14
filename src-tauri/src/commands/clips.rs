@@ -7,7 +7,7 @@ use tauri::State;
 use crate::clipboard::ClipboardService;
 use crate::protocol::{ConfigInfo, DeviceInfo, MultiConfigHandle};
 use crate::store::db::{Database, SourceAlertSetting, SourceSetting};
-use crate::ws::WsStatus;
+use crate::sync_status::WsStatus;
 use client_core::store::models::{SourceRow, StoredClip};
 use client_core::store::queries;
 
@@ -264,8 +264,7 @@ pub fn clear_local_history(
     store: State<'_, SharedStore>,
 ) -> Result<i64, String> {
     // Clear both stores until the legacy DB is retired (Task 4.3+).
-    let _ = queries::clear_all_clips(&store)
-        .map_err(|e| log::warn!("clear new store: {e}"));
+    let _ = queries::clear_all_clips(&store).map_err(|e| log::warn!("clear new store: {e}"));
     db.clear_all_clips()
 }
 

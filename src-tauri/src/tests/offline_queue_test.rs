@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::store::models::LocalClip;
-    use crate::ws::{
+    use crate::sync_status::{
         build_push_request, encrypt_or_drop_for_test as encrypt_or_drop, EncryptedPayload,
     };
 
