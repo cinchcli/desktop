@@ -257,11 +257,15 @@ pub fn preview_retention_change(db: State<'_, Arc<Database>>, days: i64) -> Resu
 
 /// Wipe every clip row + cascade-delete media files. Returns the number of
 /// rows deleted. Used by the "Clear local history" Settings button (PRV-03).
-///
-/// TODO(phase 5): also purge the client-core store when it becomes the primary.
 #[tauri::command]
 #[specta::specta]
-pub fn clear_local_history(db: State<'_, Arc<Database>>) -> Result<i64, String> {
+pub fn clear_local_history(
+    db: State<'_, Arc<Database>>,
+    store: State<'_, SharedStore>,
+) -> Result<i64, String> {
+    // Clear both stores until the legacy DB is retired (Task 4.3+).
+    let _ = queries::clear_all_clips(&store)
+        .map_err(|e| log::warn!("clear new store: {e}"));
     db.clear_all_clips()
 }
 
@@ -334,15 +338,8 @@ pub fn list_clips(
     content_type: Option<String>,
     limit: Option<i64>,
 ) -> Result<Vec<LocalClip>, String> {
-    let clips = queries::list_clips(
-        &store,
-        source.as_deref(),
-        limit,
-        None,
-        false,
-        50,
-    )
-    .map_err(|e| e.to_string())?;
+    let clips = queries::list_clips(&store, source.as_deref(), limit, None, false, 50)
+        .map_err(|e| e.to_string())?;
 
     // Optional client-side content_type filter (client-core query has no content_type filter yet).
     let filtered: Vec<LocalClip> = clips

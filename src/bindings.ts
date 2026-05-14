@@ -46,8 +46,6 @@ export const commands = {
 	/**
 	 *  Wipe every clip row + cascade-delete media files. Returns the number of
 	 *  rows deleted. Used by the "Clear local history" Settings button (PRV-03).
-	 * 
-	 *  TODO(phase 5): also purge the client-core store when it becomes the primary.
 	 */
 	clearLocalHistory: () => typedError<number, string>(__TAURI_INVOKE("clear_local_history")),
 	saveConfig: (relayUrl: string, token: string) => typedError<null, string>(__TAURI_INVOKE("save_config", { relayUrl, token })),
