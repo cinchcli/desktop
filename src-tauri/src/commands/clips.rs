@@ -6,9 +6,122 @@ use tauri::State;
 
 use crate::clipboard::ClipboardService;
 use crate::protocol::{ConfigInfo, DeviceInfo, MultiConfigHandle};
-use crate::store::db::{Database, SourceAlertSetting, SourceInfo, SourceSetting};
-use crate::store::models::LocalClip;
+use crate::store::db::{Database, SourceAlertSetting, SourceSetting};
 use crate::ws::WsStatus;
+use client_core::store::models::{SourceRow, StoredClip};
+use client_core::store::queries;
+
+/// Alias imported from lib.rs
+use crate::SharedStore;
+
+// ---------------------------------------------------------------------------
+// Local wire type kept for Specta / frontend compatibility.
+//
+// `StoredClip` from client_core uses `content: Option<Vec<u8>>` (binary-safe).
+// The frontend was built against `LocalClip` (String content + extra metadata).
+// Rather than updating every .tsx file in this task, we keep this shape and
+// convert with `stored_to_local` below.
+//
+// TODO(phase 5): migrate the frontend to consume StoredClip directly and
+// delete LocalClip from here.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct LocalClip {
+    pub id: String,
+    pub user_id: String,
+    pub content: String,
+    pub content_type: String,
+    pub source: String,
+    pub label: String,
+    pub byte_size: i64,
+    pub media_path: Option<String>,
+    pub created_at: i64, // unix seconds (frontend convention)
+    pub synced: bool,
+    pub is_pinned: bool,
+    pub pin_note: Option<String>,
+    pub received_at: i64,
+}
+
+/// Convert a `StoredClip` (client-core, ms timestamps) to a `LocalClip`
+/// (desktop frontend, second timestamps).
+fn stored_to_local(c: StoredClip) -> LocalClip {
+    let content = c
+        .content
+        .as_deref()
+        .and_then(|b| std::str::from_utf8(b).ok())
+        .unwrap_or("")
+        .to_string();
+    // client-core stores created_at in milliseconds; frontend expects seconds.
+    let created_at_secs = c.created_at / 1000;
+    LocalClip {
+        id: c.id,
+        user_id: String::new(),
+        content,
+        content_type: c.content_type,
+        source: c.source,
+        label: String::new(),
+        byte_size: c.byte_size,
+        media_path: c.media_path,
+        created_at: created_at_secs,
+        synced: true,
+        is_pinned: c.pinned,
+        pin_note: None, // pinned_at is an i64 in StoredClip; notes not stored
+        received_at: created_at_secs,
+    }
+}
+
+impl LocalClip {
+    /// Convert from the legacy `store::models::LocalClip` that `ws.rs` and
+    /// `clipboard/monitor.rs` still produce (Task 4.3 will remove those callers).
+    pub fn from_legacy(l: crate::store::models::LocalClip) -> Self {
+        Self {
+            id: l.id,
+            user_id: l.user_id,
+            content: l.content,
+            content_type: l.content_type,
+            source: l.source,
+            label: l.label,
+            byte_size: l.byte_size,
+            media_path: l.media_path,
+            created_at: l.created_at,
+            synced: l.synced,
+            is_pinned: l.is_pinned,
+            pin_note: l.pin_note,
+            received_at: l.received_at,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SourceInfo — returned to the frontend; matches the old desktop shape.
+// client_core::store::models::SourceRow has the same fields (source,
+// clip_count, last_seen) so we forward it directly but keep the desktop name
+// for Specta compatibility.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct SourceInfo {
+    pub source: String,
+    pub clip_count: i64,
+    pub last_seen: i64,
+}
+
+fn source_row_to_info(r: SourceRow) -> SourceInfo {
+    SourceInfo {
+        source: r.source,
+        clip_count: r.clip_count,
+        // client-core stores last_seen in milliseconds; convert to seconds.
+        last_seen: r.last_seen.unwrap_or(0) / 1000,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Retention config — still backed by the legacy SQLite settings table.
+// client-core has retention_prefs (per-device) but no equivalent of the
+// desktop's local_retention_days / remote_retention_days scalar pair.
+// TODO(phase 5): port to client-core retention_prefs table.
+// ---------------------------------------------------------------------------
 
 /// Settings-pane retention config (plan 01-06).
 ///
@@ -26,7 +139,7 @@ const MIN_RETENTION_DAYS: i64 = 7;
 const MAX_RETENTION_DAYS: i64 = 365;
 
 /// Best-effort sync of remote_retention_days to the relay.
-/// Fails silently -- the relay will fall back to DEFAULT 30 if unreachable.
+/// Fails silently — the relay will fall back to DEFAULT 30 if unreachable.
 async fn sync_retention_to_relay(remote_days: i64) {
     let cfg = match crate::protocol::Config::load() {
         Ok(c) => c,
@@ -34,7 +147,7 @@ async fn sync_retention_to_relay(remote_days: i64) {
     };
     let token = match crate::auth::read_credentials(&cfg) {
         Ok(t) => t,
-        Err(_) => return, // not authenticated -- skip silently
+        Err(_) => return, // not authenticated — skip silently
     };
     if token.is_empty() {
         return;
@@ -99,6 +212,8 @@ fn set_retention_config_inner(
 }
 
 // --- Retention tauri commands (plan 01-06) ---
+// TODO(phase 5): port to client-core retention_prefs table (queries::set_retention /
+// queries::list_retention). Legacy Database stays for now.
 
 #[tauri::command]
 #[specta::specta]
@@ -114,7 +229,7 @@ pub async fn set_retention_config(
     remote_days: i64,
 ) -> Result<(), String> {
     set_retention_config_inner(&db, local_days, remote_days)?;
-    // PRV-02: best-effort relay sync -- don't fail the local save if relay is unreachable
+    // PRV-02: best-effort relay sync — don't fail the local save if relay is unreachable
     let rd = remote_days;
     tauri::async_runtime::spawn(async move {
         sync_retention_to_relay(rd).await;
@@ -124,11 +239,9 @@ pub async fn set_retention_config(
 
 /// Return the number of clips that would be deleted if `local_retention_days`
 /// were set to `days` right now. Backs the Settings-pane retroactive-purge
-/// confirmation dialog. Uses `Database::count_clips_before`.
+/// confirmation dialog.
 ///
-/// `days` is clamped to `[MIN_RETENTION_DAYS, MAX_RETENTION_DAYS]` (T-06-02):
-/// `365 * 86_400 = 31_536_000` stays well within `i64`, so no overflow is
-/// possible within bounds.
+/// `days` is clamped to `[MIN_RETENTION_DAYS, MAX_RETENTION_DAYS]` (T-06-02).
 #[tauri::command]
 #[specta::specta]
 pub fn preview_retention_change(db: State<'_, Arc<Database>>, days: i64) -> Result<i64, String> {
@@ -144,27 +257,36 @@ pub fn preview_retention_change(db: State<'_, Arc<Database>>, days: i64) -> Resu
 
 /// Wipe every clip row + cascade-delete media files. Returns the number of
 /// rows deleted. Used by the "Clear local history" Settings button (PRV-03).
+///
+/// TODO(phase 5): also purge the client-core store when it becomes the primary.
 #[tauri::command]
 #[specta::specta]
 pub fn clear_local_history(db: State<'_, Arc<Database>>) -> Result<i64, String> {
     db.clear_all_clips()
 }
 
+// ---------------------------------------------------------------------------
+// Clip read commands — delegated to client_core::store::queries
+// ---------------------------------------------------------------------------
+
 #[tauri::command]
 #[specta::specta]
-pub fn list_pinned_clips(db: State<'_, Arc<Database>>) -> Result<Vec<LocalClip>, String> {
-    db.list_pinned_clips()
+pub fn list_pinned_clips(store: State<'_, SharedStore>) -> Result<Vec<LocalClip>, String> {
+    queries::list_clips(&store, None, None, None, true, 200)
+        .map(|v| v.into_iter().map(stored_to_local).collect())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn pin_clip(
-    db: State<'_, Arc<Database>>,
+    store: State<'_, SharedStore>,
     mc: State<'_, MultiConfigHandle>,
     id: String,
     note: Option<String>,
 ) -> Result<(), String> {
-    db.pin_clip(&id, note.as_deref())?;
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    queries::set_pinned(&store, &id, true, now_ms).map_err(|e| e.to_string())?;
     if let Ok((relay_url, token)) = resolve_active_creds(&mc) {
         match client_core::http::RestClient::new(relay_url, token) {
             Ok(client) => {
@@ -183,11 +305,12 @@ pub async fn pin_clip(
 #[tauri::command]
 #[specta::specta]
 pub async fn unpin_clip(
-    db: State<'_, Arc<Database>>,
+    store: State<'_, SharedStore>,
     mc: State<'_, MultiConfigHandle>,
     id: String,
 ) -> Result<(), String> {
-    db.unpin_clip(&id)?;
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    queries::set_pinned(&store, &id, false, now_ms).map_err(|e| e.to_string())?;
     if let Ok((relay_url, token)) = resolve_active_creds(&mc) {
         match client_core::http::RestClient::new(relay_url, token) {
             Ok(client) => {
@@ -206,45 +329,64 @@ pub async fn unpin_clip(
 #[tauri::command]
 #[specta::specta]
 pub fn list_clips(
-    db: State<'_, Arc<Database>>,
+    store: State<'_, SharedStore>,
     source: Option<String>,
     content_type: Option<String>,
     limit: Option<i64>,
 ) -> Result<Vec<LocalClip>, String> {
-    db.list_clips(
+    let clips = queries::list_clips(
+        &store,
         source.as_deref(),
-        content_type.as_deref(),
-        limit.unwrap_or(50),
+        limit,
+        None,
+        false,
+        50,
     )
+    .map_err(|e| e.to_string())?;
+
+    // Optional client-side content_type filter (client-core query has no content_type filter yet).
+    let filtered: Vec<LocalClip> = clips
+        .into_iter()
+        .map(stored_to_local)
+        .filter(|c| {
+            content_type
+                .as_deref()
+                .map(|ct| c.content_type == ct)
+                .unwrap_or(true)
+        })
+        .collect();
+    Ok(filtered)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn search_clips(
-    db: State<'_, Arc<Database>>,
+    store: State<'_, SharedStore>,
     query: String,
     limit: Option<i64>,
 ) -> Result<Vec<LocalClip>, String> {
-    db.search_clips(&query, limit.unwrap_or(50))
+    queries::search_clips(&store, &query, limit.unwrap_or(50))
+        .map(|v| v.into_iter().map(stored_to_local).collect())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn get_sources(db: State<'_, Arc<Database>>) -> Result<Vec<SourceInfo>, String> {
-    db.get_sources()
+pub fn get_sources(store: State<'_, SharedStore>) -> Result<Vec<SourceInfo>, String> {
+    queries::list_sources(&store)
+        .map(|v| v.into_iter().map(source_row_to_info).collect())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn delete_clip(
-    db: State<'_, Arc<Database>>,
+    store: State<'_, SharedStore>,
     mc: State<'_, MultiConfigHandle>,
     id: String,
 ) -> Result<(), String> {
     // Best-effort relay deletion: propagate to other devices via clip_deleted broadcast.
-    // If the relay is unreachable or returns an error, log and continue — the relay's
-    // TTL will eventually expire the clip. The originating device will also receive
-    // the clip_deleted WS broadcast back; ws.rs handles that with a no-op local delete.
+    // If the relay is unreachable, log and continue — relay TTL will eventually expire the clip.
     if let Ok((relay_url, token)) = resolve_active_creds(&mc) {
         match client_core::http::RestClient::new(relay_url, token) {
             Ok(client) => {
@@ -257,14 +399,18 @@ pub async fn delete_clip(
             }
         }
     }
-    db.delete_clip(&id)
+    queries::delete_clip(&store, &id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn get_clip_count(db: State<'_, Arc<Database>>) -> Result<i64, String> {
-    db.clip_count()
+pub fn get_clip_count(store: State<'_, SharedStore>) -> Result<i64, String> {
+    queries::clip_count(&store).map_err(|e| e.to_string())
 }
+
+// ---------------------------------------------------------------------------
+// Config / auth info — no store dependency
+// ---------------------------------------------------------------------------
 
 #[tauri::command]
 #[specta::specta]
@@ -277,6 +423,12 @@ pub fn get_config_info(mc: State<'_, MultiConfigHandle>) -> ConfigInfo {
         hostname: cfg.hostname.clone(),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Source-level settings — still backed by legacy Database.
+// client-core has alert_prefs but not auto_copy; keeping both on the legacy
+// store avoids half-migration. TODO(phase 5): move to client-core queries.
+// ---------------------------------------------------------------------------
 
 #[tauri::command]
 #[specta::specta]
@@ -327,11 +479,19 @@ pub fn get_all_source_alert_settings(
     db.get_all_source_alert_settings()
 }
 
+// ---------------------------------------------------------------------------
+// mark_clip_copied — TODO(phase 5): client-core has no copied_at column yet.
+// ---------------------------------------------------------------------------
+
 #[tauri::command]
 #[specta::specta]
 pub fn mark_clip_copied(db: State<'_, Arc<Database>>, id: String) -> Result<(), String> {
     db.mark_clip_copied(&id, chrono::Utc::now().timestamp())
 }
+
+// ---------------------------------------------------------------------------
+// Clipboard write commands — no store dependency
+// ---------------------------------------------------------------------------
 
 #[tauri::command]
 #[specta::specta]
@@ -362,6 +522,11 @@ pub fn copy_image_to_clipboard(
         .map_err(|e| e.to_string())
 }
 
+// ---------------------------------------------------------------------------
+// Excluded-apps setting — backed by legacy Database.
+// TODO(phase 5): move to client-core meta/settings table.
+// ---------------------------------------------------------------------------
+
 #[tauri::command]
 #[specta::specta]
 pub fn get_excluded_apps(
@@ -384,6 +549,10 @@ pub fn set_excluded_apps(db: State<'_, Arc<Database>>, apps: Vec<String>) -> Res
     db.set_setting("excluded_apps", &json)
 }
 
+// ---------------------------------------------------------------------------
+// save_config — no store dependency
+// ---------------------------------------------------------------------------
+
 #[tauri::command]
 #[specta::specta]
 pub fn save_config(app: tauri::AppHandle, relay_url: String, token: String) -> Result<(), String> {
@@ -393,14 +562,6 @@ pub fn save_config(app: tauri::AppHandle, relay_url: String, token: String) -> R
     let relay_url = relay_url.trim().trim_end_matches('/').to_string();
     let hostname = client_core::machine::hostname_or_unknown();
 
-    // This command is invoked from the React SetupScreen, which does NOT know
-    // user_id or device_id (those come from the relay during /auth/login). Phase 4's
-    // cinch:// deep-link flow will pass them explicitly. For Phase 2, we continue to
-    // accept a bare token from SetupScreen and store it under a placeholder account
-    // key — the `sign_in` tauri command (Plan 03 Task 2) is the forward-looking path.
-    //
-    // Backward-compat: write to keyring under account "<user_id>:<device_id>" if we
-    // already have those in the existing config; else fall through to plaintext.
     let existing = crate::protocol::Config::load().unwrap_or_default();
     let user_id = if existing.user_id.is_empty() {
         "unknown-user".to_string()
@@ -424,10 +585,12 @@ pub fn save_config(app: tauri::AppHandle, relay_url: String, token: String) -> R
 
     log::info!("save_config succeeded");
 
-    // Keep app.restart() for Phase 2 — SetupScreen full reload is the existing UX.
-    // Phase 3 (T1-02) will remove the restart as part of the LocalOnly-first-class rework.
     app.restart();
 }
+
+// ---------------------------------------------------------------------------
+// Helper: extract (relay_url, token) from active MultiConfig profile
+// ---------------------------------------------------------------------------
 
 fn resolve_active_creds(mc: &State<'_, MultiConfigHandle>) -> Result<(String, String), String> {
     let guard = mc.lock().unwrap();
@@ -444,32 +607,21 @@ fn resolve_active_creds(mc: &State<'_, MultiConfigHandle>) -> Result<(String, St
     Ok((profile.relay_url.clone(), token))
 }
 
+// ---------------------------------------------------------------------------
+// Device management commands — delegated to RestClient
+// ---------------------------------------------------------------------------
+
 #[tauri::command]
 #[specta::specta]
 pub async fn list_devices(mc: State<'_, MultiConfigHandle>) -> Result<Vec<DeviceInfo>, String> {
     let (relay_url, token) = resolve_active_creds(&mc)?;
-    let url = format!("{}/devices", relay_url);
-    let client = reqwest::Client::new();
-    let response = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .send()
+    let client = client_core::http::RestClient::new(relay_url, token)
+        .map_err(|e| format!("build client: {}", e))?;
+    client
+        .list_devices()
         .await
-        .map_err(|e| format!("request failed: {}", e))?;
-
-    if !response.status().is_success() {
-        return Err(format!("relay returned {}", response.status()));
-    }
-
-    let devices: Vec<DeviceInfo> = response
-        .json()
-        .await
-        .map_err(|e| format!("parse failed: {}", e))?;
-
-    Ok(devices)
+        .map_err(|e| format!("list_devices: {}", e))
 }
-
-// --- Device management commands (plan 05-03) ---
 
 #[tauri::command]
 #[specta::specta]
@@ -479,22 +631,12 @@ pub async fn set_device_nickname(
     nickname: String,
 ) -> Result<(), String> {
     let (relay_url, token) = resolve_active_creds(&mc)?;
-    let url = format!("{}/devices/{}/nickname", relay_url, device_id);
-    let client = reqwest::Client::new();
-    let response = client
-        .put(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .json(&serde_json::json!({ "nickname": nickname }))
-        .send()
+    let client = client_core::http::RestClient::new(relay_url, token)
+        .map_err(|e| format!("build client: {}", e))?;
+    client
+        .set_device_nickname(&device_id, &nickname)
         .await
-        .map_err(|e| format!("request failed: {}", e))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("relay returned {}: {}", status, body));
-    }
-    Ok(())
+        .map_err(|e| format!("set_device_nickname: {}", e))
 }
 
 #[tauri::command]
@@ -504,25 +646,18 @@ pub async fn revoke_device(
     device_id: String,
 ) -> Result<(), String> {
     let (relay_url, token) = resolve_active_creds(&mc)?;
-    let url = format!("{}/auth/device/revoke", relay_url);
-    let client = reqwest::Client::new();
-    let response = client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .json(&serde_json::json!({ "device_id": device_id }))
-        .send()
+    let client = client_core::http::RestClient::new(relay_url, token)
+        .map_err(|e| format!("build client: {}", e))?;
+    client
+        .revoke_device(&device_id)
         .await
-        .map_err(|e| format!("request failed: {}", e))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("relay returned {}: {}", status, body));
-    }
-    Ok(())
+        .map_err(|e| format!("revoke_device: {}", e))
 }
 
-// --- Global shortcut persistence (plan 03-04, D-08) ---
+// ---------------------------------------------------------------------------
+// Global shortcut persistence (plan 03-04, D-08)
+// TODO(phase 5): move to client-core meta/settings table.
+// ---------------------------------------------------------------------------
 
 const DEFAULT_GLOBAL_SHORTCUT: &str = "CmdOrCtrl+Shift+V";
 
@@ -581,11 +716,19 @@ pub fn set_global_shortcut(db: State<'_, Arc<Database>>, shortcut: String) -> Re
     set_global_shortcut_inner(&db, &shortcut)
 }
 
+// ---------------------------------------------------------------------------
+// WS status — no store dependency
+// ---------------------------------------------------------------------------
+
 #[tauri::command]
 #[specta::specta]
 pub fn get_ws_status(ws_status: State<'_, Arc<WsStatus>>) -> String {
     ws_status.get()
 }
+
+// ---------------------------------------------------------------------------
+// Focus previous app — no store dependency
+// ---------------------------------------------------------------------------
 
 /// Restore focus to the app that was frontmost before Cinch was shown, then hide the
 /// Cinch window. On non-macOS platforms this simply hides the window.
@@ -610,6 +753,11 @@ pub fn focus_previous_app(
 
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Tests — unit tests for the testable inner functions (settings, shortcut).
+// The clip-query commands are covered by the client-core wire-vector suite.
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -715,5 +863,46 @@ mod tests {
         let db = test_db();
         assert!(set_global_shortcut_inner(&db, "Alt+Space").is_ok());
         assert_eq!(get_global_shortcut_inner(&db).unwrap(), "Alt+Space");
+    }
+
+    // --- stored_to_local bridge tests ---
+
+    #[test]
+    fn stored_to_local_converts_ms_to_seconds() {
+        let sc = StoredClip {
+            id: "01JTEST00000000000000000000".to_string(),
+            source: "local".to_string(),
+            source_key: None,
+            content_type: "text".to_string(),
+            content: Some(b"hello".to_vec()),
+            media_path: None,
+            byte_size: 5,
+            created_at: 1_777_614_529_000, // ms
+            pinned: false,
+            pinned_at: None,
+        };
+        let lc = stored_to_local(sc);
+        assert_eq!(lc.created_at, 1_777_614_529); // seconds
+        assert_eq!(lc.content, "hello");
+        assert!(!lc.is_pinned);
+    }
+
+    #[test]
+    fn stored_to_local_binary_content_is_empty_string() {
+        let sc = StoredClip {
+            id: "01JTEST00000000000000000001".to_string(),
+            source: "local".to_string(),
+            source_key: None,
+            content_type: "image".to_string(),
+            content: None,
+            media_path: Some("media/shot.png".to_string()),
+            byte_size: 1024,
+            created_at: 1_000_000_000,
+            pinned: false,
+            pinned_at: None,
+        };
+        let lc = stored_to_local(sc);
+        assert_eq!(lc.content, "");
+        assert_eq!(lc.media_path.as_deref(), Some("media/shot.png"));
     }
 }

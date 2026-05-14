@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
-use specta::Type;
 
 use crate::protocol::Clip as ProtoClip;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+// NOTE: Type derive removed in Task 4.2. The authoritative Specta-exported
+// LocalClip is now crate::commands::clips::LocalClip. This struct stays for
+// ws.rs and clipboard/monitor.rs (Task 4.3 will delete those).
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalClip {
     pub id: String,
     pub user_id: String,

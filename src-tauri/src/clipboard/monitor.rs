@@ -191,9 +191,11 @@ fn handle_text_clip(
             error!("enforce_offline_cap failed: {}", e);
         }
     }
-    crate::events::ClipReceived(local_clip.clone())
-        .emit(app)
-        .ok();
+    crate::events::ClipReceived(
+        crate::commands::clips::LocalClip::from_legacy(local_clip.clone()),
+    )
+    .emit(app)
+    .ok();
     info!(
         "captured local clip: {} bytes (synced={})",
         byte_size, synced
@@ -286,9 +288,11 @@ fn handle_image_clip(
             error!("enforce_offline_cap failed: {}", e);
         }
     }
-    crate::events::ClipReceived(local_clip.clone())
-        .emit(app)
-        .ok();
+    crate::events::ClipReceived(
+        crate::commands::clips::LocalClip::from_legacy(local_clip.clone()),
+    )
+    .emit(app)
+    .ok();
     info!(
         "captured local image clip: {} bytes (synced={})",
         byte_size, synced
