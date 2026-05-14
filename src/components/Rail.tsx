@@ -2,7 +2,7 @@ import type { CSSProperties } from 'react';
 import { C } from '../design';
 import { IconInbox, IconPin, IconMonitor, IconGear } from '../icons';
 
-export type RailPanel = 'inbox' | 'pinned' | 'machines';
+export type RailPanel = 'inbox' | 'pinned' | 'devices';
 
 interface RailProps {
   active: RailPanel;
@@ -20,6 +20,7 @@ interface RailItemProps {
 function RailItem({ label, active, onClick, children }: RailItemProps) {
   return (
     <button
+      type="button"
       aria-label={label}
       title={label}
       aria-current={active ? 'page' : undefined}
@@ -45,7 +46,7 @@ export function Rail({ active, onSelect, onOpenSettings }: RailProps) {
       <RailItem label="Pinned" active={active === 'pinned'} onClick={() => onSelect('pinned')}>
         <IconPin size={20} />
       </RailItem>
-      <RailItem label="Machines" active={active === 'machines'} onClick={() => onSelect('machines')}>
+      <RailItem label="Devices" active={active === 'devices'} onClick={() => onSelect('devices')}>
         <IconMonitor size={20} />
       </RailItem>
       <span style={{ flex: 1 }} aria-hidden="true" />

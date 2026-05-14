@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { commands } from '../bindings';
-import { MachinesPanel } from './MachinesPanel';
+import { DevicesPanel } from './DevicesPanel';
 
 vi.mock('../bindings', () => ({
   commands: {
@@ -14,7 +14,7 @@ vi.mock('../bindings', () => ({
   },
 }));
 
-describe('MachinesPanel', () => {
+describe('DevicesPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
@@ -41,9 +41,9 @@ describe('MachinesPanel', () => {
     vi.mocked(commands.setDeviceNickname).mockResolvedValue({ status: 'ok', data: null });
   });
 
-  it('shows a per-machine desktop alert toggle and persists changes', async () => {
+  it('shows a per-device desktop alert toggle and persists changes', async () => {
     render(
-      <MachinesPanel
+      <DevicesPanel
         currentDeviceID="local-device"
         onShowToast={vi.fn()}
       />,
@@ -59,16 +59,16 @@ describe('MachinesPanel', () => {
     });
   });
 
-  it('shows machine customization inline and persists a tag color', async () => {
+  it('shows device customization inline and persists a tag color', async () => {
     render(
-      <MachinesPanel
+      <DevicesPanel
         currentDeviceID="local-device"
         onShowToast={vi.fn()}
       />,
     );
 
     fireEvent.click(await screen.findByRole('button', { name: /customize prod/i }));
-    const settings = screen.getByRole('region', { name: /machine settings for prod/i });
+    const settings = screen.getByRole('region', { name: /device settings for prod/i });
     fireEvent.click(screen.getByRole('button', { name: /amber color for prod/i }));
 
     expect(localStorage.getItem('cinch.machineTagColors.v1')).toBe(
@@ -82,16 +82,16 @@ describe('MachinesPanel', () => {
     });
   });
 
-  it('makes machine name editing explicit and persists the new name', async () => {
+  it('makes device name editing explicit and persists the new name', async () => {
     render(
-      <MachinesPanel
+      <DevicesPanel
         currentDeviceID="local-device"
         onShowToast={vi.fn()}
       />,
     );
 
     fireEvent.click(await screen.findByRole('button', { name: /customize prod/i }));
-    const input = screen.getByLabelText(/machine display name/i);
+    const input = screen.getByLabelText(/device display name/i);
     fireEvent.change(input, { target: { value: 'Build Mac' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -100,7 +100,7 @@ describe('MachinesPanel', () => {
     });
   });
 
-  it('persists a local display name for source-only machines', async () => {
+  it('persists a local display name for source-only devices', async () => {
     vi.mocked(commands.listDevices).mockResolvedValue({ status: 'ok', data: [] });
     vi.mocked(commands.getSources).mockResolvedValue({
       status: 'ok',
@@ -108,14 +108,14 @@ describe('MachinesPanel', () => {
     });
 
     render(
-      <MachinesPanel
+      <DevicesPanel
         currentDeviceID="local-device"
         onShowToast={vi.fn()}
       />,
     );
 
     fireEvent.click(await screen.findByRole('button', { name: /customize ci-runner/i }));
-    const input = screen.getByLabelText(/machine display name/i);
+    const input = screen.getByLabelText(/device display name/i);
     fireEvent.change(input, { target: { value: 'CI Runner' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 

@@ -17,7 +17,7 @@ import { IconX } from "./icons";
 import ConfirmDialog from "./ConfirmDialog";
 import RetentionSlider from "./RetentionSlider";
 import { AddRelayDialog } from "./components/AddRelayDialog";
-import { MachinesPanel } from "./components/MachinesPanel";
+import { DevicesPanel } from "./components/DevicesPanel";
 import { useAuthState, signOut } from "./lib/state/auth";
 import { useNotifyOnRemoteLogin } from "./lib/settings";
 import { PendingLoginCard } from "./components/PendingLoginCard";
@@ -439,7 +439,7 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
               Pending login requests
             </div>
             <div style={{ fontSize: 12, fontWeight: 500, color: C.t3, marginBottom: 16 }}>
-              Approve or deny sign-in requests from other machines running{" "}
+              Approve or deny sign-in requests from other devices running{" "}
               <code style={{ fontFamily: "var(--font-mono)" }}>cinch auth login</code>.
             </div>
             {pending.length > 0 ? (
@@ -509,11 +509,11 @@ export default function SettingsPane({ onClose, clipCount }: SettingsPaneProps) 
               </div>
             )}
 
-            {/* Remote Machines */}
+            {/* Remote Devices */}
             <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.012em', color: C.t1, marginBottom: 10 }}>
-              Remote machines
+              Remote devices
             </div>
-            <MachinesPanel
+            <DevicesPanel
               currentDeviceID={auth.variant === "Authenticated" ? auth.payload.device_id : ""}
               currentMachineId={auth.variant === "Authenticated" ? auth.payload.machine_id : ""}
               onShowToast={() => {}}

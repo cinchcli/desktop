@@ -27,7 +27,7 @@ import { AddSshMachineDialog } from './AddSshMachineDialog';
 
 // ─── Props ────────────────────────────────────────────────
 
-interface MachinesPanelProps {
+interface DevicesPanelProps {
   currentDeviceID: string;
   currentMachineId?: string;
   onShowToast: (message: string) => void;
@@ -45,14 +45,14 @@ function settingsToAlertMap(settings: SourceAlertSetting[]): Record<string, bool
   return Object.fromEntries(settings.map((s) => [s.source, s.alert_enabled]));
 }
 
-// ─── MachinesPanel ────────────────────────────────────────
+// ─── DevicesPanel ─────────────────────────────────────────
 
-export function MachinesPanel({
+export function DevicesPanel({
   currentDeviceID,
   currentMachineId = '',
   onShowToast,
   onDeviceChange,
-}: MachinesPanelProps) {
+}: DevicesPanelProps) {
   const [devices, setDevices] = useState<Device[]>([]);
   const [sources, setSources] = useState<SourceInfo[]>([]);
   const [alertSettings, setAlertSettings] = useState<Record<string, boolean>>({});
@@ -138,7 +138,7 @@ export function MachinesPanel({
       if (s.source === 'local') {
         // The "local" source represents clips made on this machine. When the
         // current machine is already in the paired-devices list, that row
-        // already represents this machine — adding a synthetic "This machine"
+        // already represents this machine — adding a synthetic "This device"
         // row would duplicate it. Only add the synthetic entry if the current
         // device isn't paired (e.g., transient relay/auth lag), and at most
         // once.
@@ -296,7 +296,7 @@ export function MachinesPanel({
             <div className="skeleton-shimmer" style={S.skeletonBlockSubtitle} />
           </div>
         </header>
-        <ul aria-label="Machines loading" style={{ ...S.list, listStyle: 'none', margin: 0, padding: 0 }}>
+        <ul aria-label="Devices loading" style={{ ...S.list, listStyle: 'none', margin: 0, padding: 0 }}>
           {[0, 1, 2].map((i) => (
             <li key={i} style={{ ...S.rowWrap, listStyle: 'none' }}>
               <div style={S.skeletonRow}>
@@ -349,7 +349,7 @@ export function MachinesPanel({
       <div style={S.panel}>
         <header style={S.toolbar}>
           <div style={S.titleBlock}>
-            <h1 style={S.pageTitle}>Machines</h1>
+            <h1 style={S.pageTitle}>Devices</h1>
             <p style={S.pageSubtitle}>
               Paired devices and remote sources that send clips to this desk.
             </p>
@@ -361,9 +361,9 @@ export function MachinesPanel({
         <div style={S.emptyState}>
           <div style={S.emptyCard}>
             <div style={S.emptyKicker}>Getting started</div>
-            <div style={S.emptyHeading}>No machines yet</div>
+            <div style={S.emptyHeading}>No devices yet</div>
             <div style={S.emptyBody}>
-              Pair a device so clips can sync between your machines.
+              Pair a device so clips can sync between your devices.
             </div>
             <code style={S.emptyCode}>cinch auth pair</code>
             <button
@@ -402,13 +402,13 @@ export function MachinesPanel({
       confirmingRevokeId
     : confirmingRevokeId;
 
-  // ── Machine grid ─────────────────────────────────────────
+  // ── Device grid ──────────────────────────────────────────
 
   return (
     <div style={S.panel}>
       <header style={S.toolbar}>
         <div style={S.titleBlock}>
-          <h1 style={S.pageTitle}>Machines</h1>
+          <h1 style={S.pageTitle}>Devices</h1>
           <p style={S.pageSubtitle}>
             {pairedCount} paired · {totalCount} total · manage alerts and display names
           </p>
@@ -425,14 +425,14 @@ export function MachinesPanel({
             className="btn-primary"
             style={S.toolbarPrimary}
             onClick={() => setShowSshDialog(true)}
-            aria-label="Add machine via SSH"
+            aria-label="Add device via SSH"
           >
             Add via SSH
           </button>
         </div>
       </header>
 
-      <ul aria-label="Machines" style={{ ...S.list, listStyle: 'none', margin: 0, padding: 0 }}>
+      <ul aria-label="Devices" style={{ ...S.list, listStyle: 'none', margin: 0, padding: 0 }}>
         {merged.map((entry) => {
           if (entry.kind === 'local') {
             return (
@@ -454,7 +454,7 @@ export function MachinesPanel({
                       </span>
                       <span style={S.thisDeviceBadge}>This device</span>
                     </div>
-                    <div style={S.cardName}>This machine</div>
+                    <div style={S.cardName}>This device</div>
                     <div style={S.cardMeta}>Local clipboard · this Cinch instance</div>
                   </div>
                 </div>
@@ -514,7 +514,7 @@ export function MachinesPanel({
                   <div style={S.rowActions}>
                     <button
                       type="button"
-                      className="machines-btn"
+                      className="devices-btn"
                       style={S.customizeBtn}
                       onClick={() => toggleSettings(s.source, displayName)}
                       aria-expanded={settingsOpen}
@@ -530,7 +530,7 @@ export function MachinesPanel({
                   </div>
                 </div>
                 {settingsOpen && (
-                  <MachineSettingsPanel
+                  <DeviceSettingsPanel
                     source={s.source}
                     name={displayName}
                     sourceLabel={sourceLabel}
@@ -559,8 +559,8 @@ export function MachinesPanel({
           const colorSlot = tagColors[sourceKey];
           const pillVars = sourcePillVars(sourceKey, colorSlot);
           const alertSource = device.source_key;
-          const alertName = device.hostname || displayName || 'machine';
-          const editLabelName = device.hostname || displayName || 'machine';
+          const alertName = device.hostname || displayName || 'device';
+          const editLabelName = device.hostname || displayName || 'device';
           const settingsOpen = openSettingsSource === sourceKey;
 
           return (
@@ -608,7 +608,7 @@ export function MachinesPanel({
                 <div style={S.rowActions}>
                   <button
                     type="button"
-                    className="machines-btn"
+                    className="devices-btn"
                     style={S.customizeBtn}
                     onClick={() => toggleSettings(sourceKey, displayName)}
                     aria-expanded={settingsOpen}
@@ -634,7 +634,7 @@ export function MachinesPanel({
                 </div>
               </div>
               {settingsOpen && (
-                <MachineSettingsPanel
+                <DeviceSettingsPanel
                   source={sourceKey}
                   name={editLabelName}
                   sourceLabel={device.hostname ?? sourceKey}
@@ -659,13 +659,13 @@ export function MachinesPanel({
             className="pair-row"
             style={S.pairRow}
             onClick={() => setShowSshDialog(true)}
-            aria-label="Add machine via SSH"
+            aria-label="Add device via SSH"
           >
             <span style={S.pairPlus} aria-hidden>
               +
             </span>
             <span style={S.pairRowText}>
-              <span style={S.pairHeading}>Pair another machine</span>
+              <span style={S.pairHeading}>Pair another device</span>
               <span style={S.pairBody}>SSH wizard · installs Cinch where you develop</span>
             </span>
           </button>
@@ -723,7 +723,7 @@ function AlertToggle({
   return (
     <button
       type="button"
-      className="machines-btn"
+      className="devices-btn"
       style={{ ...S.alertBtn, ...(enabled ? S.alertBtnOn : S.alertBtnOff) }}
       onClick={onClick}
       aria-label={`${enabled ? 'Turn desktop alerts off' : 'Turn desktop alerts on'} for ${name}`}
@@ -733,7 +733,7 @@ function AlertToggle({
   );
 }
 
-function MachineSettingsPanel({
+function DeviceSettingsPanel({
   source,
   name,
   sourceLabel,
@@ -765,7 +765,7 @@ function MachineSettingsPanel({
   return (
     <section
       style={S.settingsPanel}
-      aria-label={`Machine settings for ${name}`}
+      aria-label={`Device settings for ${name}`}
     >
       <div style={S.fieldBlock}>
         <div style={S.fieldHeader}>
@@ -794,7 +794,7 @@ function MachineSettingsPanel({
           }}
           maxLength={32}
           spellCheck={false}
-          aria-label="Machine display name"
+          aria-label="Device display name"
         />
         {error && <span style={S.nicknameErrorText}>{error}</span>}
       </div>

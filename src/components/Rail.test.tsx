@@ -3,11 +3,11 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { Rail } from './Rail';
 
 describe('Rail', () => {
-  it('renders 4 icon buttons (Inbox, Pinned, Machines, Settings)', () => {
+  it('renders 4 icon buttons (Inbox, Pinned, Devices, Settings)', () => {
     render(<Rail active="inbox" onSelect={() => {}} onOpenSettings={() => {}} />);
     expect(screen.getByLabelText(/inbox/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/pinned/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/machines/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/devices/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/settings/i)).toBeInTheDocument();
   });
 
@@ -20,8 +20,8 @@ describe('Rail', () => {
   it('calls onSelect with the panel id when an icon is clicked', () => {
     const onSelect = vi.fn();
     render(<Rail active="inbox" onSelect={onSelect} onOpenSettings={() => {}} />);
-    fireEvent.click(screen.getByLabelText(/machines/i));
-    expect(onSelect).toHaveBeenCalledWith('machines');
+    fireEvent.click(screen.getByLabelText(/devices/i));
+    expect(onSelect).toHaveBeenCalledWith('devices');
   });
 
   it('calls onOpenSettings when the gear is clicked (not onSelect)', () => {

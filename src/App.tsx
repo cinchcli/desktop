@@ -32,7 +32,7 @@ import { ClipList } from './components/ClipList';
 import { ClipDetail } from './components/ClipDetail';
 import { StatusBar } from './components/StatusBar';
 import { PinnedPanel } from './components/PinnedPanel';
-import { MachinesPanel } from './components/MachinesPanel';
+import { DevicesPanel } from './components/DevicesPanel';
 import { dialogStyles } from './components/dialogPrimitives';
 import { IconCopy, IconTrash } from './icons';
 import './App.css';
@@ -408,7 +408,7 @@ function App() {
       }
       if ((e.metaKey || e.ctrlKey) && (e.key === '1' || e.key === '2' || e.key === '3')) {
         e.preventDefault();
-        const panels: RailPanel[] = ['inbox', 'pinned', 'machines'];
+        const panels: RailPanel[] = ['inbox', 'pinned', 'devices'];
         const panel = panels[parseInt(e.key) - 1];
         setActivePanel(panel);
         setSelectedClip(null);
@@ -422,7 +422,7 @@ function App() {
         !(e.target instanceof HTMLTextAreaElement)
       ) {
         e.preventDefault();
-        const panels: RailPanel[] = ['inbox', 'pinned', 'machines'];
+        const panels: RailPanel[] = ['inbox', 'pinned', 'devices'];
         const idx = panels.indexOf(activePanel);
         const next = e.shiftKey
           ? (idx - 1 + panels.length) % panels.length
@@ -564,8 +564,8 @@ function App() {
           onOpenSettings={() => setShowSettings(true)}
         />
 
-        {activePanel === 'machines' ? (
-          <MachinesPanel
+        {activePanel === 'devices' ? (
+          <DevicesPanel
             currentDeviceID={currentDeviceID}
             currentMachineId={currentMachineId}
             onShowToast={(msg) => showToast(msg, 'copy')}
@@ -612,8 +612,8 @@ function App() {
 
       <StatusBar
         clipCount={totalClips}
-        machinesOnline={devices.length > 0 ? devices.filter(d => d.online).length : undefined}
-        machinesTotal={devices.length > 0 ? devices.length : undefined}
+        devicesOnline={devices.length > 0 ? devices.filter(d => d.online).length : undefined}
+        devicesTotal={devices.length > 0 ? devices.length : undefined}
         hints={selectedClip
           ? [
               { keys: '↵', label: 'copy' },
@@ -857,8 +857,8 @@ function ShortcutPanel({ onClose }: { onClose: () => void }) {
         { keys: ['^H', '^L'], label: 'Cycle source filter' },
         { keys: ['⌘1'], label: 'Go to Inbox' },
         { keys: ['⌘2'], label: 'Go to Pinned' },
-        { keys: ['⌘3'], label: 'Go to Machines' },
-        { keys: ['⇥'], label: 'Next panel (Inbox → Pinned → Machines)' },
+        { keys: ['⌘3'], label: 'Go to Devices' },
+        { keys: ['⇥'], label: 'Next panel (Inbox → Pinned → Devices)' },
         { keys: ['⇧⇥'], label: 'Previous panel' },
       ],
     },
