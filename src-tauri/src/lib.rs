@@ -127,8 +127,6 @@ pub fn run() {
 
     let ws_relay_url = config.relay_url.clone();
     let ws_token = config.token.clone();
-    let relay_url_for_delta = config.relay_url.clone();
-    let token_for_delta = config.token.clone();
     let config_for_auth_seed = config.clone();
 
     // ── Phase 4: open shared client-core Store at ~/.cinch/store.db ──────────
@@ -172,10 +170,8 @@ pub fn run() {
                 token: config.token.clone(),
                 encryption_key: enc_key,
             };
-            match client_core::http::RestClient::new(
-                config.relay_url.clone(),
-                config.token.clone(),
-            ) {
+            match client_core::http::RestClient::new(config.relay_url.clone(), config.token.clone())
+            {
                 Ok(rest_client) => {
                     let rest_arc = Arc::new(rest_client);
                     let store_for_writer = shared_store.clone();
@@ -553,32 +549,11 @@ pub fn run() {
                 // Show dashboard on launch
                 show_on_active_monitor(handle);
 
-                // Delta-sync clips from relay on startup (fetches only new clips)
-                let db_delta = db.clone();
-                tauri::async_runtime::spawn(async move {
-                    match client_core::http::RestClient::new(relay_url_for_delta, token_for_delta) {
-                        Ok(http) => {
-                            let http = std::sync::Arc::new(http);
-                            match delta_sync(&db_delta, &http).await {
-                                Ok(n) => info!("startup delta_sync complete: {} clips", n),
-                                Err(e) => log::error!("startup delta_sync failed: {}", e),
-                            }
-                            // tombstone sync after delta
-                            match tombstone_sync(&db_delta, &http).await {
-                                Ok(n) => info!("startup tombstone_sync: applied {} deletions", n),
-                                Err(e) => log::warn!("startup tombstone_sync failed: {}", e),
-                            }
-                        }
-                        Err(e) => log::error!("startup delta_sync: cannot build client: {}", e),
-                    }
-                });
-
-                // Phase 4: the legacy ws::spawn_ws_client call is replaced by
-                // the client_core::sync::Writer started above (before the Tauri
-                // builder).  The Writer manages its own WS reconnect loop and
-                // writes incoming clips to the shared client-core Store.
-                // Task 4.3 will delete ws.rs entirely once commands/clips.rs
-                // is migrated to the new store (Task 4.2).
+                // Note: delta-sync of the legacy com.cinch.app/clips.db has been removed.
+                // The client_core::sync::Writer (started above, before the Tauri builder)
+                // handles all REST backfill and live WS writes into the shared client-core
+                // store (~/.cinch/store.db). Task 4.3 will delete ws.rs once that path
+                // is confirmed stable in production.
                 let _ = (ws_relay_url, ws_token); // consumed by Writer above
             } else {
                 // No config — show window immediately with setup instructions
@@ -917,142 +892,7 @@ pub(crate) fn sanitize_media_path(media_path: &str) -> Result<std::path::PathBuf
     Ok(path.to_path_buf())
 }
 
-async fn tombstone_sync(
-    db: &Arc<store::db::Database>,
-    http: &Arc<client_core::http::RestClient>,
-) -> Result<usize, String> {
-    // Read watermark from settings. Key: "last_tombstone_at" (RFC3339 string).
-    let since = db
-        .get_setting("last_tombstone_at")
-        .ok()
-        .flatten()
-        .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
-        .map(|dt| dt.with_timezone(&chrono::Utc));
-
-    let tombstones = http
-        .list_tombstones(since)
-        .await
-        .map_err(|e| format!("tombstone_sync: {}", e))?;
-
-    let count = tombstones.len();
-    for t in &tombstones {
-        if let Err(e) = db.delete_clip(&t.clip_id) {
-            log::warn!("tombstone_sync: delete_clip {} failed: {}", t.clip_id, e);
-        }
-    }
-
-    // Advance watermark to the latest tombstone's deleted_at.
-    if let Some(last) = tombstones.last() {
-        if let Err(e) = db.set_setting("last_tombstone_at", &last.deleted_at) {
-            log::warn!("tombstone_sync: update watermark failed: {}", e);
-        }
-    }
-
-    log::info!("tombstone_sync: applied {} deletions", count);
-    Ok(count)
-}
-
-const DELTA_PAGE_SIZE: u32 = 100;
-const DELTA_MAX_PAGES: usize = 50; // safety cap: 5000 clips max per sync
-
-async fn delta_sync(
-    db: &Arc<store::db::Database>,
-    http: &Arc<client_core::http::RestClient>,
-) -> Result<usize, String> {
-    let mut since = db.max_created_at()?.and_then(|ts| {
-        if ts == 0 {
-            None
-        } else {
-            chrono::DateTime::from_timestamp(ts, 0)
-        }
-    });
-    let mut total = 0usize;
-
-    for page in 0..DELTA_MAX_PAGES {
-        let clips = http
-            .list_clips_since(since, DELTA_PAGE_SIZE)
-            .await
-            .map_err(|e| format!("delta_sync: {}", e))?;
-
-        let page_len = clips.len();
-        if page_len == 0 {
-            break;
-        }
-
-        let received_at = chrono::Utc::now().timestamp();
-        for proto_clip in &clips {
-            let mut clip = proto_clip.clone();
-            if clip.encrypted {
-                match client_core::credstore::read_encryption_key(&clip.user_id) {
-                    Some(key) => match client_core::crypto::decrypt(&key, &clip.content) {
-                        Ok(plaintext) => {
-                            let is_binary = clip.media_path.is_some()
-                                || clip.content_type.as_str().starts_with("image");
-                            clip.content = if is_binary {
-                                use base64::Engine;
-                                base64::engine::general_purpose::STANDARD.encode(&plaintext)
-                            } else {
-                                String::from_utf8(plaintext).unwrap_or_else(|e| {
-                                    String::from_utf8_lossy(e.as_bytes()).to_string()
-                                })
-                            };
-                            clip.encrypted = false;
-                        }
-                        Err(e) => {
-                            log::warn!("delta_sync: decryption failed for {}: {}", clip.clip_id, e);
-                        }
-                    },
-                    None => {
-                        log::warn!(
-                            "delta_sync: no encryption key for clip {} (user {})",
-                            clip.clip_id,
-                            clip.user_id
-                        );
-                    }
-                }
-            }
-            let local = store::models::LocalClip::from_proto(&clip, received_at);
-            if let Err(e) = db.insert_clip(&local) {
-                log::error!("delta_sync insert failed: {}", e);
-            }
-        }
-        total += page_len;
-
-        if (page_len as u32) < DELTA_PAGE_SIZE {
-            break; // last page — no more to fetch
-        }
-
-        // Advance watermark for next page.
-        let new_since = clips
-            .last()
-            .and_then(|c| chrono::DateTime::parse_from_rfc3339(&c.created_at).ok())
-            .map(|dt| dt.with_timezone(&chrono::Utc));
-
-        // No-progress guard: if watermark didn't change, all clips in this page
-        // share the same timestamp and the relay's `created_at > since` filter
-        // will return 0 results next page. Break to avoid silent data loss.
-        if new_since == since {
-            log::warn!(
-                "delta_sync: watermark stalled at {:?} after {} clips — \
-                 {} clips may share the same timestamp, stopping to avoid data loss",
-                since,
-                total,
-                page_len
-            );
-            break;
-        }
-
-        if page == DELTA_MAX_PAGES - 1 {
-            log::warn!(
-                "delta_sync: hit max-page cap ({} pages, {} clips)",
-                DELTA_MAX_PAGES,
-                total
-            );
-        }
-
-        since = new_since;
-    }
-
-    log::info!("delta_sync: fetched {} clips total", total);
-    Ok(total)
-}
+// delta_sync and tombstone_sync were removed in Task 4.2.
+// Backfill into the shared client-core store is now handled exclusively by
+// client_core::sync::Writer (started at app launch in run()). The legacy
+// com.cinch.app/clips.db no longer receives startup syncs.

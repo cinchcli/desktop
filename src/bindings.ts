@@ -38,16 +38,16 @@ export const commands = {
 	/**
 	 *  Return the number of clips that would be deleted if `local_retention_days`
 	 *  were set to `days` right now. Backs the Settings-pane retroactive-purge
-	 *  confirmation dialog. Uses `Database::count_clips_before`.
+	 *  confirmation dialog.
 	 * 
-	 *  `days` is clamped to `[MIN_RETENTION_DAYS, MAX_RETENTION_DAYS]` (T-06-02):
-	 *  `365 * 86_400 = 31_536_000` stays well within `i64`, so no overflow is
-	 *  possible within bounds.
+	 *  `days` is clamped to `[MIN_RETENTION_DAYS, MAX_RETENTION_DAYS]` (T-06-02).
 	 */
 	previewRetentionChange: (days: number) => typedError<number, string>(__TAURI_INVOKE("preview_retention_change", { days })),
 	/**
 	 *  Wipe every clip row + cascade-delete media files. Returns the number of
 	 *  rows deleted. Used by the "Clear local history" Settings button (PRV-03).
+	 * 
+	 *  TODO(phase 5): also purge the client-core store when it becomes the primary.
 	 */
 	clearLocalHistory: () => typedError<number, string>(__TAURI_INVOKE("clear_local_history")),
 	saveConfig: (relayUrl: string, token: string) => typedError<null, string>(__TAURI_INVOKE("save_config", { relayUrl, token })),

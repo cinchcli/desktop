@@ -3,7 +3,7 @@ use specta::Type;
 use tauri_specta::Event;
 
 use crate::auth::AuthState;
-use crate::store::models::LocalClip;
+use crate::commands::clips::LocalClip;
 
 #[derive(Clone, Serialize, Deserialize, Type, Event)]
 pub struct AuthStateChanged(pub AuthState);

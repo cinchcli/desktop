@@ -217,25 +217,10 @@ async fn connect_and_listen(
     // Flush offline queue on reconnect
     flush_offline_queue(app, db).await;
 
-    // Delta-sync: pull any clips we missed while disconnected.
-    // Reuse the relay_url and token already passed into this function — no
-    // disk read needed and avoids a race with concurrent config writes.
-    match client_core::http::RestClient::new(relay_url.to_string(), token.to_string()) {
-        Ok(http) => {
-            let http = std::sync::Arc::new(http);
-            match crate::delta_sync(db, &http).await {
-                Ok(n) if n > 0 => info!("reconnect delta_sync: {} new clips", n),
-                Ok(_) => {}
-                Err(e) => warn!("reconnect delta_sync failed: {}", e),
-            }
-            match crate::tombstone_sync(db, &http).await {
-                Ok(n) if n > 0 => info!("reconnect tombstone_sync: applied {} deletions", n),
-                Ok(_) => {}
-                Err(e) => warn!("reconnect tombstone_sync failed: {}", e),
-            }
-        }
-        Err(e) => warn!("reconnect delta_sync: cannot build client: {}", e),
-    }
+    // Note: reconnect delta-sync and tombstone-sync for the legacy
+    // com.cinch.app/clips.db were removed in Task 4.2. The client_core::sync::Writer
+    // handles backfill into ~/.cinch/store.db via its own reconnect loop.
+    // Task 4.3 will delete ws.rs entirely.
 
     let (write, mut read) = ws_stream.split();
     let write = Arc::new(Mutex::new(write));
@@ -396,7 +381,11 @@ async fn handle_text_message(
                             Ok(true) => {
                                 let local_clip =
                                     LocalClip::from_proto(&clip, chrono::Utc::now().timestamp());
-                                crate::events::ClipReceived(local_clip).emit(app).ok();
+                                crate::events::ClipReceived(
+                                    crate::commands::clips::LocalClip::from_legacy(local_clip),
+                                )
+                                .emit(app)
+                                .ok();
                                 info!("merged relay echo into local clip: {}", clip.clip_id);
                             }
                             Ok(false) => {
@@ -504,7 +493,11 @@ async fn handle_text_message(
                 }
 
                 // Emit to frontend (send the local clip with detected type)
-                crate::events::ClipReceived(local_clip).emit(app).ok();
+                crate::events::ClipReceived(
+                    crate::commands::clips::LocalClip::from_legacy(local_clip),
+                )
+                .emit(app)
+                .ok();
             }
         }
         ACTION_SEND_CLIPBOARD => {
