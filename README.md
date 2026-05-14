@@ -1,6 +1,6 @@
 # Cinch Desktop
 
-Copy from any terminal. Paste anywhere — including your Mac.
+Your clipboard. Across every machine.
 
 Cinch Desktop is the macOS companion for Cinch: every `cinch push` from a remote SSH box, Docker container, or CI job lands in your system clipboard before you reach Cmd+V. Comes with persistent, searchable local history and real-time WebSocket delivery.
 
@@ -48,6 +48,8 @@ cd src-tauri && cargo test export_bindings -- --ignored
 ## Privacy & data storage
 
 Clips are stored locally in `~/Library/Application Support/com.cinch.app/clips.db` (SQLite + FTS5, plaintext). Cinch trusts macOS FileVault for at-rest protection.
+
+The desktop app now uses `~/.cinch/store.db` as the canonical clip store, shared with the `cinch` CLI. On first launch after upgrade, the desktop migrates the legacy database at `~/Library/Application Support/com.cinchcli.desktop/cinch.db` (macOS) or `~/.local/share/com.cinchcli.desktop/cinch.db` (Linux) into the shared location; the old file is renamed to `<old>.db.bak` and is not deleted.
 
 ## Links
 
