@@ -22,20 +22,23 @@ jobs:
           node-version: 22
           cache: 'pnpm'
 
-      - name: Remove pre-installed Rust shims
-        # macos-latest ships rustup-init binaries at /usr/local/bin/cargo
-        # (Intel) and /opt/homebrew/bin/cargo (Apple Silicon) that proxy to
-        # rustup-init when called as `cargo`. dtolnay's toolchain at
-        # ~/.cargo/bin is occasionally ordered behind those on PATH —
-        # breaking `cargo fmt` with "unexpected argument 'fmt'" because the
-        # rustup-init shim doesn't accept subcommands. Removing the shims
-        # so only the dtolnay-installed toolchain remains reachable.
+      - name: Wipe pre-installed Rust state
+        # macos-latest ships rustup-init binaries that proxy to
+        # `rustup-init` when called as `cargo` — running `cargo fmt`
+        # gets "unexpected argument 'fmt'" with rustup-init's usage.
+        # The shims live in BOTH system bin dirs (/usr/local/bin,
+        # /opt/homebrew/bin) AND `~/.cargo/bin`. dtolnay's action
+        # detects the existing `~/.cargo/bin` and skips writing fresh
+        # binaries there, leaving the shim. Wipe everything so the
+        # toolchain install is fully fresh.
         run: |
+          rm -rf "$HOME/.cargo/bin" "$HOME/.rustup"
           for d in /usr/local/bin /opt/homebrew/bin; do
             if [ -d "$d" ]; then
               sudo rm -f \
-                "$d/cargo" "$d/cargo-fmt" "$d/cargo-clippy" \
-                "$d/rustc" "$d/rustdoc" "$d/rustup" \
+                "$d/cargo" "$d/cargo-fmt" "$d/cargo-clippy" "$d/cargo-miri" \
+                "$d/rustc" "$d/rustdoc" "$d/rustfmt" "$d/clippy-driver" \
+                "$d/rustup" "$d/rustup-init" \
                 "$d/rust-gdb" "$d/rust-lldb"
             fi
           done
