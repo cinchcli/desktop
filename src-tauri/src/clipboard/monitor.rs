@@ -1,10 +1,10 @@
-//! Clipboard polling loop. Drives `ClipboardService`, applies dedup,
-//! excluded-app filter, and DB persistence.
+//! Clipboard polling loop. Drives `ClipboardService`, applies dedup and the
+//! excluded-app filter, then hands captured clips to `client_core::sync::LocalPusher`
+//! which encrypts, pushes to the relay, and write-throughs to the shared store.
 
-use log::{error, info};
+use log::{error, info, warn};
 use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::AppHandle;
 use tauri_specta::Event;
@@ -13,7 +13,7 @@ use tokio::time::{self, Duration};
 use super::backend::{PollContent, PollSnapshot};
 use super::service::ClipboardService;
 use crate::store::db::Database;
-use crate::store::models::{detect_content_type, LocalClip};
+use crate::LocalPusherHandle;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 const DEDUP_WINDOW_SECS: i64 = 5;
@@ -55,12 +55,12 @@ pub fn spawn_clipboard_monitor(
     app: &AppHandle,
     db: Arc<Database>,
     service: Arc<ClipboardService>,
-    relay_connected: Arc<AtomicBool>,
+    pusher_handle: LocalPusherHandle,
 ) {
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
         info!("clipboard monitor started");
-        run_monitor_loop(&app_handle, &db, &service, &relay_connected).await;
+        run_monitor_loop(&app_handle, &db, &service, &pusher_handle).await;
     });
 }
 
@@ -68,13 +68,14 @@ async fn run_monitor_loop(
     app: &AppHandle,
     db: &Arc<Database>,
     service: &Arc<ClipboardService>,
-    relay_connected: &Arc<AtomicBool>,
+    pusher_handle: &LocalPusherHandle,
 ) {
     let mut last_token: Option<u64> = service.token();
     let mut recent_hashes: VecDeque<RecentHash> = VecDeque::new();
     let mut interval = time::interval(POLL_INTERVAL);
 
     let excluded_apps = load_excluded_apps(db, service);
+    let source = format!("remote:{}", client_core::machine::hostname_or_unknown());
 
     loop {
         interval.tick().await;
@@ -117,15 +118,21 @@ async fn run_monitor_loop(
 
         let now = chrono::Utc::now().timestamp();
 
-        let synced = relay_connected.load(Ordering::Relaxed);
-
         match snapshot.content {
             PollContent::Text(text) if !text.is_empty() => {
-                handle_text_clip(text, db, app, &mut recent_hashes, now, synced);
+                handle_text_clip(text, app, pusher_handle, &mut recent_hashes, now, &source);
             }
             PollContent::ImagePng(bytes) => {
                 if bytes.len() <= MAX_IMAGE_BYTES {
-                    handle_image_clip(&bytes, db, app, &mut recent_hashes, now, synced);
+                    // TODO: image push needs cinch://media URI scheme +
+                    // local media-cache write to keep UI rendering working.
+                    // Tracked separately; for now log and drop so we don't
+                    // store ciphertext orphaned from any cache file.
+                    warn!(
+                        "clipboard: image clip ({} bytes) detected but not yet pushed — \
+                         image ingest path is pending follow-up",
+                        bytes.len()
+                    );
                 } else {
                     info!("skipping oversized image: {} bytes", bytes.len());
                 }
@@ -137,11 +144,11 @@ async fn run_monitor_loop(
 
 fn handle_text_clip(
     text: String,
-    db: &Arc<Database>,
     app: &AppHandle,
+    pusher_handle: &LocalPusherHandle,
     recent_hashes: &mut VecDeque<RecentHash>,
     now: i64,
-    synced: bool,
+    source: &str,
 ) {
     let hash = compute_hash(text.as_bytes());
 
@@ -162,141 +169,75 @@ fn handle_text_clip(
         recent_hashes.pop_front();
     }
 
-    let clip_id = ulid::Ulid::new().to_string();
-    let content_type = detect_content_type(&text, "text");
-    let byte_size = text.len() as i64;
+    // Snapshot the pusher (cheap clone — Arcs inside) so the polling loop
+    // never holds the Mutex across an await.
+    let pusher = {
+        let guard = match pusher_handle.lock() {
+            Ok(g) => g,
+            Err(e) => {
+                error!("clipboard: pusher mutex poisoned: {}", e);
+                return;
+            }
+        };
+        match &*guard {
+            Some(p) => p.clone(),
+            None => {
+                warn!(
+                    "clipboard: dropped {}-byte text clip — not configured \
+                     (run `cinch auth login` to enable sync)",
+                    text.len()
+                );
+                return;
+            }
+        }
+    };
 
-    let local_clip = LocalClip {
-        id: clip_id,
+    let raw = text.into_bytes();
+    let byte_size = raw.len() as i64;
+    let source = source.to_string();
+    let app = app.clone();
+
+    tauri::async_runtime::spawn(async move {
+        match pusher.push_text(raw, &source, "").await {
+            Ok(clip_id) => {
+                info!(
+                    "clipboard: pushed text clip {} ({} bytes)",
+                    clip_id, byte_size
+                );
+                let payload = clip_received_stub(&clip_id, &source, byte_size);
+                let _ = crate::events::ClipReceived(payload).emit(&app);
+            }
+            Err(e) => {
+                warn!("clipboard: text clip ingest failed: {}", e);
+            }
+        }
+    });
+}
+
+/// Build a minimal `LocalClip` payload for the `ClipReceived` event. The React
+/// listener uses this only as a refresh trigger (it re-fetches via `list_clips`
+/// in the handler), so we do not need to round-trip every field.
+fn clip_received_stub(
+    clip_id: &str,
+    source: &str,
+    byte_size: i64,
+) -> crate::commands::clips::LocalClip {
+    let now_secs = chrono::Utc::now().timestamp();
+    crate::commands::clips::LocalClip {
+        id: clip_id.to_string(),
         user_id: String::new(),
-        content: text,
-        content_type,
-        source: "local".to_string(),
+        content: String::new(),
+        content_type: "text/plain".to_string(),
+        source: source.to_string(),
         label: String::new(),
         byte_size,
         media_path: None,
-        created_at: now,
-        synced,
+        created_at: now_secs,
+        synced: true,
         is_pinned: false,
         pin_note: None,
-        received_at: now,
-    };
-
-    if let Err(e) = db.insert_clip(&local_clip) {
-        error!("failed to insert local clip: {}", e);
-        return;
+        received_at: now_secs,
     }
-    if !synced {
-        if let Err(e) = db.enforce_offline_cap(500) {
-            error!("enforce_offline_cap failed: {}", e);
-        }
-    }
-    crate::events::ClipReceived(crate::commands::clips::LocalClip::from_legacy(
-        local_clip.clone(),
-    ))
-    .emit(app)
-    .ok();
-    info!(
-        "captured local clip: {} bytes (synced={})",
-        byte_size, synced
-    );
-}
-
-fn handle_image_clip(
-    image_data: &[u8],
-    db: &Arc<Database>,
-    app: &AppHandle,
-    recent_hashes: &mut VecDeque<RecentHash>,
-    now: i64,
-    synced: bool,
-) {
-    let hash = compute_hash(image_data);
-
-    while recent_hashes
-        .front()
-        .is_some_and(|h| now - h.timestamp > DEDUP_WINDOW_SECS)
-    {
-        recent_hashes.pop_front();
-    }
-    if recent_hashes.iter().any(|h| h.hash == hash) {
-        return;
-    }
-    recent_hashes.push_back(RecentHash {
-        hash,
-        timestamp: now,
-    });
-
-    let clip_id = ulid::Ulid::new().to_string();
-    let media_dir = dirs::data_dir()
-        .unwrap_or_else(|| dirs::home_dir().unwrap().join(".local/share"))
-        .join("com.cinch.app")
-        .join("media");
-
-    if std::fs::create_dir_all(&media_dir).is_err() {
-        error!("failed to create media directory");
-        return;
-    }
-
-    let filename = format!("{}.png", clip_id);
-    let file_path = media_dir.join(&filename);
-
-    let png_data = match image::load_from_memory(image_data) {
-        Ok(img) => {
-            let mut buf = Vec::new();
-            if img
-                .write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
-                .is_err()
-            {
-                error!("failed to encode PNG");
-                return;
-            }
-            buf
-        }
-        Err(_) => image_data.to_vec(),
-    };
-
-    if std::fs::write(&file_path, &png_data).is_err() {
-        error!("failed to write image file");
-        return;
-    }
-
-    let byte_size = png_data.len() as i64;
-    let media_path = format!("media/{}", filename);
-
-    let local_clip = LocalClip {
-        id: clip_id,
-        user_id: String::new(),
-        content: String::new(),
-        content_type: "image".to_string(),
-        source: "local".to_string(),
-        label: String::new(),
-        byte_size,
-        media_path: Some(media_path),
-        created_at: now,
-        synced,
-        is_pinned: false,
-        pin_note: None,
-        received_at: now,
-    };
-
-    if let Err(e) = db.insert_clip(&local_clip) {
-        error!("failed to insert image clip: {}", e);
-        return;
-    }
-    if !synced {
-        if let Err(e) = db.enforce_offline_cap(500) {
-            error!("enforce_offline_cap failed: {}", e);
-        }
-    }
-    crate::events::ClipReceived(crate::commands::clips::LocalClip::from_legacy(
-        local_clip.clone(),
-    ))
-    .emit(app)
-    .ok();
-    info!(
-        "captured local image clip: {} bytes (synced={})",
-        byte_size, synced
-    );
 }
 
 fn load_excluded_apps(db: &Database, service: &ClipboardService) -> Vec<String> {
