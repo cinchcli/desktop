@@ -90,14 +90,25 @@ export const commands = {
 	 */
 	handleDeeplink: (url: string) => typedError<null, string>(__TAURI_INVOKE("handle_deeplink", { url })),
 	/**
-	 *  pair_via_ssh — SSH into a remote machine, install cinch, and run
-	 *  `cinch auth login --headless` so the remote authenticates independently.
+	 *  pair_via_ssh — SSH into a remote machine, install/upgrade cinch, and
+	 *  authenticate it against the same relay account as the local desktop.
 	 * 
-	 *  When the remote emits the `<<CINCH-DEVICE-CODE>>` marker, this command
-	 *  fires a `SshPairMarkerFound` event carrying the verification URL so the
-	 *  frontend can open the browser. The command then blocks until the SSH
-	 *  process exits (i.e., until the remote device completes OAuth and
-	 *  registers its public key with the relay).
+	 *  Verification contract (fixes the 0.1.5 silent-success bug):
+	 *    1. The local desktop must already be signed in to the target relay.
+	 *       Otherwise we cannot tell whether the remote ended up linked to the
+	 *       right user_id — abort up front rather than report false success.
+	 *    2. The remote script always emits a `<<CINCH-PAIRED-OK>>{...}<<END>>`
+	 *       marker on stdout when it considers the remote paired (either it
+	 *       reused an existing matching pairing, or it ran a fresh device-code
+	 *       login). Without that marker, SSH exit 0 means nothing.
+	 *    3. After the SSH process exits, we require the marker to have been
+	 *       observed AND its `user_id` to match the local user. A blank or
+	 *       mismatching marker becomes a hard error so the UI shows "Setup
+	 *       failed" instead of "paired successfully".
+	 * 
+	 *  In parallel, when the remote emits the legacy `<<CINCH-DEVICE-CODE>>`
+	 *  marker (fresh-pair path) we still fire `SshPairMarkerFound` so the
+	 *  frontend opens the browser.
 	 */
 	pairViaSsh: (target: string, relayUrl: string | null, skipInstall: boolean) => typedError<null, string>(__TAURI_INVOKE("pair_via_ssh", { target, relayUrl, skipInstall })),
 	// list_ssh_hosts — return concrete aliases from the user's ~/.ssh/config.
