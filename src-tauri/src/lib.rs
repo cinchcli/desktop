@@ -30,6 +30,12 @@ pub type SharedStore = Arc<client_core::store::Store>;
 /// so the shutdown path can `take()` it and call `Writer::shutdown`.
 pub type WriterHandle = Mutex<Option<client_core::sync::Writer>>;
 
+/// Local-clip ingest pipeline (encrypt + push to relay + write-through to
+/// shared store). Lives independently of `Writer` so reader-mode desktops
+/// (lock held by another process) can still publish locally-detected clips.
+/// Wrapped so `restart_writer` can swap it on credential change.
+pub type LocalPusherHandle = Arc<Mutex<Option<client_core::sync::LocalPusher>>>;
+
 pub type PreviousAppPid = Arc<Mutex<Option<i32>>>;
 
 pub fn make_specta_builder() -> Builder<tauri::Wry> {
@@ -157,12 +163,17 @@ pub fn run() {
         }
     };
 
-    // ── Phase 4: build WsConfig and start sync::Writer ───────────────────────
+    // ── Phase 4: build WsConfig, start sync::Writer, and build LocalPusher ───
     // We do this in the outer run() scope (before Tauri's setup hook) so the
     // writer is started exactly once at launch with the credentials that were
     // live at startup.  The writer handle is moved into managed state so Tauri
     // keeps it alive for the full process lifetime.
-    let writer_handle: WriterHandle = {
+    //
+    // The LocalPusher is built independently — it does not require the lock,
+    // so a reader-mode desktop (lock held by CLI/another desktop) can still
+    // push locally-detected clips. Both handles are swapped together by
+    // `restart_writer` on credential changes.
+    let (writer_handle, local_pusher_handle): (WriterHandle, LocalPusherHandle) = {
         if is_configured && !config.token.is_empty() && !config.relay_url.is_empty() {
             let enc_key = client_core::credstore::read_encryption_key(&config.user_id);
             let ws_cfg = client_core::ws::WsConfig {
@@ -174,38 +185,45 @@ pub fn run() {
             {
                 Ok(rest_client) => {
                     let rest_arc = Arc::new(rest_client);
+                    let pusher = client_core::sync::LocalPusher::new(
+                        shared_store.clone(),
+                        rest_arc.clone(),
+                        enc_key,
+                    );
                     let store_for_writer = shared_store.clone();
                     let lock_p = client_core::store::lock_path()
                         .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/cinch.lock"));
-                    match tauri::async_runtime::block_on(client_core::sync::Writer::start(
-                        store_for_writer,
-                        rest_arc,
-                        ws_cfg,
-                        lock_p,
-                        client_core::sync::LockKind::Desktop,
-                    )) {
-                        Ok(Some(w)) => {
-                            info!("client-core sync::Writer started");
-                            Mutex::new(Some(w))
-                        }
-                        Ok(None) => {
-                            log::warn!("sync::Writer: lock held by another process, skipping");
-                            Mutex::new(None)
-                        }
-                        Err(e) => {
-                            log::warn!("sync::Writer::start failed (non-fatal): {}", e);
-                            Mutex::new(None)
-                        }
-                    }
+                    let writer =
+                        match tauri::async_runtime::block_on(client_core::sync::Writer::start(
+                            store_for_writer,
+                            rest_arc,
+                            ws_cfg,
+                            lock_p,
+                            client_core::sync::LockKind::Desktop,
+                        )) {
+                            Ok(Some(w)) => {
+                                info!("client-core sync::Writer started");
+                                Mutex::new(Some(w))
+                            }
+                            Ok(None) => {
+                                log::warn!("sync::Writer: lock held by another process, skipping");
+                                Mutex::new(None)
+                            }
+                            Err(e) => {
+                                log::warn!("sync::Writer::start failed (non-fatal): {}", e);
+                                Mutex::new(None)
+                            }
+                        };
+                    (writer, Arc::new(Mutex::new(Some(pusher))))
                 }
                 Err(e) => {
                     log::warn!("cannot build RestClient for Writer (non-fatal): {}", e);
-                    Mutex::new(None)
+                    (Mutex::new(None), Arc::new(Mutex::new(None)))
                 }
             }
         } else {
-            // Not yet configured — no writer until auth completes.
-            Mutex::new(None)
+            // Not yet configured — no writer or pusher until auth completes.
+            (Mutex::new(None), Arc::new(Mutex::new(None)))
         }
     };
 
@@ -305,9 +323,10 @@ pub fn run() {
         .manage(auth_state_handle.clone())
         .manage(pending_codes_handle.clone())
         .manage(previous_app_pid.clone())
-        // Phase 4: shared client-core Store and sync Writer
+        // Phase 4: shared client-core Store, sync Writer, and LocalPusher
         .manage(shared_store)
         .manage(writer_handle)
+        .manage(local_pusher_handle.clone())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
@@ -568,12 +587,15 @@ pub fn run() {
                 });
             }
 
-            // Spawn local clipboard monitor — always runs (relay-independent)
+            // Spawn local clipboard monitor — always runs (relay-independent).
+            // The LocalPusher handle drives encrypt + push + store-write; if it
+            // is `None` (unconfigured) the monitor short-circuits and drops the
+            // capture rather than writing plaintext locally.
             clipboard::monitor::spawn_clipboard_monitor(
                 handle,
                 db.clone(),
                 clipboard_service.clone(),
-                relay_connected.clone(),
+                local_pusher_handle.clone(),
             );
 
             // Spawn local retention sweep — purges clips older than the
@@ -945,6 +967,16 @@ pub(crate) async fn restart_writer(
     let store: crate::SharedStore = app.state::<crate::SharedStore>().inner().clone();
     let lock_path = client_core::store::lock_path()
         .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/cinch.lock"));
+
+    // Rebuild the LocalPusher with the new credentials so the next clipboard
+    // capture pushes through the live token. Done before swapping the Writer
+    // so a capture racing the swap still has a working pusher.
+    {
+        let pusher = client_core::sync::LocalPusher::new(store.clone(), rest_arc.clone(), enc_key);
+        let handle = app.state::<crate::LocalPusherHandle>();
+        let mut guard = handle.lock().map_err(|e| e.to_string())?;
+        *guard = Some(pusher);
+    }
 
     // Shut down the old writer first so it releases the lockfile.
     // Take the Writer out while holding the lock, then drop the lock before

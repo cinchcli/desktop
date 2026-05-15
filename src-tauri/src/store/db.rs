@@ -214,6 +214,11 @@ impl Database {
         Ok(())
     }
 
+    // Legacy clip-row writers — production callers were removed when the
+    // clipboard monitor migrated to client_core::sync::LocalPusher. Kept for
+    // the in-file test suite that still exercises the legacy schema, and as a
+    // safety net for any future one-shot migration code.
+    #[allow(dead_code)]
     pub fn insert_clip(&self, clip: &LocalClip) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -608,6 +613,11 @@ impl Database {
     /// Enforce the offline queue cap by dropping the oldest unsynced clips
     /// when the count exceeds `max_unsynced`. Returns the number of clips dropped.
     /// Mitigates T-04-07 (DoS via unbounded DB growth during extended offline).
+    ///
+    /// Currently exercised only by the in-file tests — production callers were
+    /// removed when the clipboard monitor moved to `LocalPusher`. A real
+    /// offline-queue replacement on the shared store is a follow-up.
+    #[allow(dead_code)]
     pub fn enforce_offline_cap(&self, max_unsynced: usize) -> Result<usize, String> {
         let conn = self.conn.lock().unwrap();
 
