@@ -12,9 +12,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install protobuf compiler
-        run: brew install protobuf
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -29,6 +26,12 @@ jobs:
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           components: rustfmt,clippy
+
+      - name: Install protobuf compiler
+        # Must come after Rust install — installing brew packages first
+        # leaves macos-latest's pre-installed cargo shim ahead of the
+        # dtolnay-installed toolchain on PATH, breaking `cargo fmt`.
+        run: brew install protobuf
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
