@@ -12,22 +12,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate sibling pin files
-        # Cheap format check on every PR. The full sibling-HEAD comparison
-        # runs in desktop-release.yml after the cinch + relay clones.
-        run: |
-          for f in .cinch-ref .relay-ref; do
-            if [ ! -f "$f" ]; then
-              echo "::error::missing pin file: $f" >&2
-              exit 1
-            fi
-            ref=$(tr -d '[:space:]' < "$f")
-            if [[ ! "$ref" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "::error::$f must contain a 40-char git sha, got: '$ref'" >&2
-              exit 1
-            fi
-            echo "$f = $ref"
-          done
+      - name: Install protobuf compiler
+        run: brew install protobuf
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -61,16 +47,14 @@ jobs:
       - name: Cargo fmt
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 
-      # cargo clippy + cargo check require the cinch + relay sibling
-      # checkouts (path-dep on client-core, proto-cinch's build.rs reads
-      # relay/proto). The default GITHUB_TOKEN can't fetch the private
-      # cinchcli/cinch + cinchcli/relay repos. Disabled until a PAT with
-      # cross-repo read access is wired in via secrets, or the sibling
-      # repos are made public.
-      # TODO(infra): re-enable after cross-repo access is set up.
+      - name: Cargo check
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      # Cargo clippy disabled until pre-existing style nits get cleaned
+      # up in a follow-up PR (e.g. `map_or(true, ...)` → `is_none_or`).
+      # The previous reason ("can't fetch private cinchcli/relay") went
+      # away with Phase 4 — all deps now resolve via crates.io.
+      # TODO(infra): re-enable once the desktop tree is clippy-clean.
       #
       # - name: Cargo clippy
       #   run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-      #
-      # - name: Cargo check
-      #   run: cargo check --manifest-path src-tauri/Cargo.toml

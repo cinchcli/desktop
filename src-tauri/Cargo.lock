@@ -640,7 +640,7 @@ dependencies = [
  "aes-gcm",
  "base64 0.22.1",
  "chrono",
- "client-core",
+ "cinchcli-core",
  "dirs 6.0.0",
  "env_logger",
  "futures-util",
@@ -676,18 +676,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "cipher"
-version = "0.4.4"
+name = "cinchcli-core"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
-dependencies = [
- "crypto-common 0.1.7",
- "inout",
-]
-
-[[package]]
-name = "client-core"
-version = "0.1.4"
+checksum = "48f8a374f715eb10a4c3891178d5ce5fc8aea202aabc2cffc7d69f5250f12b0f"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -698,7 +690,8 @@ dependencies = [
  "hkdf",
  "hostname",
  "keyring",
- "proto-cinch",
+ "prost",
+ "prost-build",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",
@@ -712,6 +705,16 @@ dependencies = [
  "ulid",
  "url",
  "x25519-dalek",
+]
+
+[[package]]
+name = "cipher"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
+dependencies = [
+ "crypto-common 0.1.7",
+ "inout",
 ]
 
 [[package]]
@@ -4134,16 +4137,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52c2c1bf36ddb1a1c396b3601a3cec27c2462e45f07c386894ec3ccf5332bd16"
 dependencies = [
  "prost",
-]
-
-[[package]]
-name = "proto-cinch"
-version = "0.1.3"
-dependencies = [
- "prost",
- "prost-build",
- "serde",
- "specta",
 ]
 
 [[package]]
