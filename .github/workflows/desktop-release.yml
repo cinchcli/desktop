@@ -70,12 +70,8 @@ jobs:
       - name: Install protobuf compiler
         run: brew install protobuf
 
-      - name: Checkout cinch sibling at pinned ref
-        run: |
-          ref=$(tr -d '[:space:]' < .cinch-ref)
-          git clone https://x-access-token:${{ secrets.CINCH_READ_PAT }}@github.com/cinchcli/cinch.git ../cinch
-          git -C ../cinch checkout "$ref"
-
+      # cinch sibling checkout removed — client-core now ships from
+      # crates.io as `cinchcli-core` and is locked via Cargo.lock.
       - name: Checkout relay sibling at pinned ref
         run: |
           ref=$(tr -d '[:space:]' < .relay-ref)

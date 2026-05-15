@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# Verify that the sibling checkouts of `cinch` and `relay` are at the
-# exact commits this desktop revision was built and tested against.
+# Verify that the sibling checkout of `relay` is at the exact commit
+# this desktop revision was built and tested against.
 #
-# Why: src-tauri/Cargo.toml has a path-dep on ../../cinch/crates/client-core
-# and proto-cinch/build.rs reads ../../../relay/proto. Both are unpinned
-# at the source level — Cargo accepts whatever bytes are on disk. Without
-# this gate, a CI release on day N could silently consume a client-core
-# API that didn't exist when the desktop code was written. The pin files
-# `.cinch-ref` and `.relay-ref` make the dependency explicit; this script
-# turns drift from "silent surprise" into "loud CI failure".
+# Why: relay still owns proto/cinch/v1/ at this stage of the cinch-core
+# extraction. The `.relay-ref` pin file makes the proto-source revision
+# explicit; this script turns drift from "silent surprise" into "loud
+# CI failure".
+#
+# `cinch` was previously pinned the same way (path-dep on
+# ../../cinch/crates/client-core), but client-core now ships from
+# crates.io as `cinchcli-core` — Cargo.lock pins the version, so the
+# `.cinch-ref` mechanism is obsolete. The relay pin will retire too once
+# Phase 4 lands (relay starts importing Go bindings from cinch-core).
 #
 # Run locally before pushing: `bash scripts/check-sibling-pins.sh`
 set -euo pipefail
@@ -55,6 +58,5 @@ check_pin() {
   echo "✓ $name pin matches: $expected"
 }
 
-check_pin cinch || fail=1
 check_pin relay || fail=1
 exit $fail

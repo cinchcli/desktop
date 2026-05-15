@@ -14,9 +14,11 @@ jobs:
 
       - name: Validate sibling pin files
         # Cheap format check on every PR. The full sibling-HEAD comparison
-        # runs in desktop-release.yml after the cinch + relay clones.
+        # runs in desktop-release.yml after the relay clone. cinch is no
+        # longer pinned this way — client-core ships as `cinchcli-core`
+        # on crates.io and is locked via Cargo.lock.
         run: |
-          for f in .cinch-ref .relay-ref; do
+          for f in .relay-ref; do
             if [ ! -f "$f" ]; then
               echo "::error::missing pin file: $f" >&2
               exit 1
@@ -61,13 +63,14 @@ jobs:
       - name: Cargo fmt
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 
-      # cargo clippy + cargo check require the cinch + relay sibling
-      # checkouts (path-dep on client-core, proto-cinch's build.rs reads
-      # relay/proto). The default GITHUB_TOKEN can't fetch the private
-      # cinchcli/cinch + cinchcli/relay repos. Disabled until a PAT with
-      # cross-repo read access is wired in via secrets, or the sibling
-      # repos are made public.
-      # TODO(infra): re-enable after cross-repo access is set up.
+      # cargo clippy + cargo check still need the relay sibling
+      # checkout (cinchcli-core's build.rs reads relay/proto in this
+      # interim phase via the wire-vector test path). The default
+      # GITHUB_TOKEN can't fetch the private cinchcli/relay repo.
+      # Disabled until a PAT with cross-repo read access is wired in,
+      # the relay repo is made public, or Phase 4 lands and removes
+      # the relay-sibling dependency entirely.
+      # TODO(infra): re-enable after Phase 4.
       #
       # - name: Cargo clippy
       #   run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
