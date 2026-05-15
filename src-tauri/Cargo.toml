@@ -17,7 +17,7 @@ tauri-build = { version = "2", features = [] }
 # target-scoped dependencies table at the bottom of this file — do NOT
 # branch inside the Rust source with `#[cfg(not(target_os = "macos"))]`.
 [dependencies]
-client-core = { path = "../../cinch/crates/client-core", features = ["specta"] }
+client-core = { package = "cinchcli-core", version = "0.1.1", features = ["specta"] }
 tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "2"
