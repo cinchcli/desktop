@@ -677,9 +677,9 @@ dependencies = [
 
 [[package]]
 name = "cinchcli-core"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28e1cb71ad697949d2fdb442cb370cfd41ab6a19deed81deca0987018258794e"
+checksum = "c5187dbfb5d77f97c6993c8d2ad2a7ef87ca9cb82037ca3448098e0d658857d3"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -690,6 +690,7 @@ dependencies = [
  "hkdf",
  "hostname",
  "keyring",
+ "log",
  "prost",
  "prost-build",
  "reqwest 0.12.28",
