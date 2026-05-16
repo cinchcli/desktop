@@ -21,7 +21,7 @@ export type AuthErrorReason =
     | { kind: 'NetworkDown' }
     | { kind: 'InvalidPairToken' };
 
-export type AuthenticatedPayload = {
+type AuthenticatedPayload = {
     user_id: string;
     device_id: string;
     hostname: string;
@@ -30,7 +30,7 @@ export type AuthenticatedPayload = {
     machine_id: string;
 };
 
-export type ErrorRecoverablePayload = {
+type ErrorRecoverablePayload = {
     reason: AuthErrorReason;
     retry_after_ms: number | null;
 };
@@ -111,12 +111,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuthState(): AuthState {
     return useContext(AuthContext);
-}
-
-export function useActiveRelayId(): string | null {
-    const state = useContext(AuthContext);
-    if (state.variant === 'Authenticated') return state.payload.active_relay_id;
-    return null;
 }
 
 // Imperative actions — thin wrappers over typed commands.
