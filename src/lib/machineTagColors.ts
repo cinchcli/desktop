@@ -14,7 +14,7 @@ const VALID_SOURCE_COLOR_SLOTS = new Set<SourceColorSlot>([
   'sage',
 ]);
 
-export function isSourceColorSlot(value: unknown): value is SourceColorSlot {
+function isSourceColorSlot(value: unknown): value is SourceColorSlot {
   return typeof value === 'string' && VALID_SOURCE_COLOR_SLOTS.has(value as SourceColorSlot);
 }
 

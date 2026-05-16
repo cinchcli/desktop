@@ -30,12 +30,6 @@ export const IconX = ({ size = 12, style }: IconProps) => (
   </svg>
 );
 
-export const IconCaret = ({ size = 10, style }: IconProps) => (
-  <svg {...base(size)} style={style}>
-    <path d="m6 9 6 6 6-6" />
-  </svg>
-);
-
 export const IconCopy = ({ size = 14, style }: IconProps) => (
   <svg {...base(size)} style={style}>
     <rect x="9" y="9" width="11" height="11" rx="2" />
@@ -86,12 +80,6 @@ export const IconAlert = ({ size = 14, style }: IconProps) => (
   <svg {...base(size)} style={style}>
     <circle cx="12" cy="12" r="9" />
     <path d="M12 8v5M12 16h.01" />
-  </svg>
-);
-
-export const IconArrowReturn = ({ size = 12, style }: IconProps) => (
-  <svg {...base(size)} style={style}>
-    <path d="M20 8v4a2 2 0 0 1-2 2H6m0 0 4-4m-4 4 4 4" />
   </svg>
 );
 
@@ -183,14 +171,6 @@ export const IconMonitor = ({ size = 14, style }: IconProps) => (
     <rect x="2" y="3" width="20" height="14" rx="2" />
     <line x1="8" y1="21" x2="16" y2="21" />
     <line x1="12" y1="17" x2="12" y2="21" />
-  </svg>
-);
-
-export const IconAutoCopy = ({ size = 14, style }: IconProps) => (
-  <svg {...base(size)} style={style}>
-    <rect x="8" y="2" width="8" height="4" rx="1" />
-    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-    <path d="M12 10v6M9.5 13.5 12 16l2.5-2.5" />
   </svg>
 );
 

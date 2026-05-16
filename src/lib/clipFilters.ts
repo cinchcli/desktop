@@ -3,10 +3,10 @@ import type { LocalClip } from '../bindings';
 export const CLIP_FILTERS = ['all', 'text', 'image', 'code', 'url'] as const;
 
 export type ClipFilter = typeof CLIP_FILTERS[number];
-export type EditableClipFilter = Exclude<ClipFilter, 'all'>;
-export type ClipFilterRules = Record<EditableClipFilter, string[]>;
+type EditableClipFilter = Exclude<ClipFilter, 'all'>;
+type ClipFilterRules = Record<EditableClipFilter, string[]>;
 
-export const DEFAULT_CLIP_FILTER_RULES: ClipFilterRules = {
+const DEFAULT_CLIP_FILTER_RULES: ClipFilterRules = {
   text: ['text', 'json'],
   image: ['image'],
   code: ['code'],
