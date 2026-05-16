@@ -117,6 +117,35 @@ export const IconGear = ({ size = 13, style }: IconProps) => (
   </svg>
 );
 
+// ─── Brand mark ───────────────────────────────────────────
+// Cinch logo: open-arc "C" + small rect (pipe). Single stroke + fill via
+// currentColor so the parent's color token drives dark/light theming.
+export const IconCinch = ({ size = 22, style }: IconProps) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 180 180"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    style={style}
+    aria-hidden="true"
+  >
+    <path
+      d="M130.154 60.9231C123.825 50.6639 114.323 42.7493 103.088 38.3807C91.8538 34.0121 79.5007 33.4279 67.904 36.7169C56.3073 40.0059 46.1003 46.9884 38.832 56.6047C31.5638 66.221 27.6313 77.946 27.6313 90C27.6313 102.054 31.5638 113.779 38.832 123.395C46.1003 133.012 56.3073 139.994 67.904 143.283C79.5007 146.572 91.8538 145.988 103.088 141.619C114.323 137.251 123.825 129.336 130.154 119.077"
+      stroke="currentColor"
+      strokeWidth="30.4615"
+    />
+    <rect
+      x="132.923"
+      y="67.8462"
+      width="20.7692"
+      height="44.3077"
+      rx="2.07692"
+      fill="currentColor"
+    />
+  </svg>
+);
+
 // ─── Content type icons ──────────────────────────────────
 
 export const IconBinary = ({ size = 14, style }: IconProps) => (
