@@ -64,7 +64,7 @@ development, keep the override out of `Cargo.toml`. Use an uncommitted
 
 The desktop's clipboard polling pipeline classifies text clips before pushing:
 
-- `clipboard/monitor.rs` calls `client_core::classify::detect(&text)` **before** consuming `text.into_bytes()` (borrow checker — the classifier needs `&str`, the pusher needs `Vec<u8>`).
+- `clipboard/monitor.rs` calls `client_core::classify::detect(&raw)` on the byte buffer produced by `text.into_bytes()`. The bytes-in API means there's no `&str` / `Vec<u8>` borrow dance and no upfront UTF-8 walk over the clipboard payload.
 - `ContentType` derives `Copy`, so the classified value moves cleanly into the spawned async closure.
 - The classified value flows into both `pusher.push_text(.., content_type)` (wire) and the `clip_received_stub(.., content_type.as_wire())` event payload (frontend).
 

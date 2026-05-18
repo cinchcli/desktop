@@ -192,8 +192,8 @@ fn handle_text_clip(
         }
     };
 
-    let content_type = client_core::classify::detect(&text);
     let raw = text.into_bytes();
+    let content_type = client_core::classify::detect(&raw);
     let byte_size = raw.len() as i64;
     let source = source.to_string();
     let app = app.clone();

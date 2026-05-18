@@ -704,9 +704,9 @@ dependencies = [
 
 [[package]]
 name = "cinchcli-core"
-version = "0.1.9"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "098f9ff9efa514a372602ebdfedb211f570b92644c3a11880bb146d88ca3e5f3"
+checksum = "f40f1836fe18106727faf3641100ff0e26facbab54d26de6269c08481a5b5335"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
