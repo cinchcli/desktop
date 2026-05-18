@@ -11,6 +11,22 @@ vi.mock('../bindings', () => ({
     setSourceAlertEnabled: vi.fn(),
     setDeviceNickname: vi.fn(),
     revokeDevice: vi.fn(),
+    getLatestVersions: vi.fn(async () => ({
+      cli: 'v0.1.8',
+      desktop: 'v0.1.7',
+      fetched_at: 0,
+    })),
+    getDeviceVersionStatus: vi.fn(async (reported: string | null) => {
+      if (reported === '0.1.5') return 'Outdated';
+      if (reported === '0.1.8' || reported === '0.1.7') return 'UpToDate';
+      return 'Unknown';
+    }),
+    runSelfUpdate: vi.fn(async () => undefined),
+  },
+  events: {
+    latestVersionsUpdated: {
+      listen: vi.fn(() => Promise.resolve(() => {})),
+    },
   },
 }));
 
@@ -29,6 +45,8 @@ describe('DevicesPanel', () => {
           last_push_at: '2026-05-06T01:00:00Z',
           online: true,
           nickname: 'Prod',
+          client_version: '0.1.5',
+          client_type: 'cli',
         },
       ],
     });
@@ -98,6 +116,22 @@ describe('DevicesPanel', () => {
     await waitFor(() => {
       expect(commands.setDeviceNickname).toHaveBeenCalledWith('d-prod', 'Build Mac');
     });
+  });
+
+  it('shows the device version badge and a "How to update" link for outdated CLI peers', async () => {
+    render(
+      <DevicesPanel
+        currentDeviceID="local-device"
+        onShowToast={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('0.1.5')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByLabelText('outdated')).toBeInTheDocument();
+    });
+    const link = screen.getByRole('link', { name: /how to update/i });
+    expect(link).toHaveAttribute('href', 'https://cinchcli.com/docs/update#cli');
   });
 
   it('persists a local display name for source-only devices', async () => {

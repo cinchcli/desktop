@@ -21,6 +21,8 @@ import {
   type MachineDisplayNameMap,
 } from '../lib/machineDisplayNames';
 import type { Device, SourceAlertSetting, SourceInfo } from '../bindings';
+import { useLatestVersions } from '../lib/state/versions';
+import { DeviceVersionCell } from './DeviceVersionCell';
 import ConfirmDialog from '../ConfirmDialog';
 import { CleanupDialog } from './CleanupDialog';
 import { AddSshMachineDialog } from './AddSshMachineDialog';
@@ -71,6 +73,10 @@ export function DevicesPanel({
   const [showSshDialog, setShowSshDialog] = useState(false);
   const nicknameErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
+
+  // Drives the per-device version badge in each row below; the hook keeps
+  // itself in sync with the 6h background refresh emitted by Rust.
+  const latestVersions = useLatestVersions();
 
   // ── Poll lifecycle ──────────────────────────────────────
 
@@ -603,6 +609,16 @@ export function DevicesPanel({
                   <div style={S.cardName}>{displayName}</div>
                   <div style={S.cardMeta}>
                     push relay · {device.clip_count ?? 0} clips · {lastSeen(device)}
+                  </div>
+                  <div style={{ ...S.cardMeta, marginTop: 4 }}>
+                    <DeviceVersionCell
+                      version={device.client_version ?? null}
+                      clientType={device.client_type ?? null}
+                      latest={latestVersions}
+                      isOwnDesktop={
+                        isCurrentDevice && device.client_type === 'desktop'
+                      }
+                    />
                   </div>
                 </div>
                 <div style={S.rowActions}>
