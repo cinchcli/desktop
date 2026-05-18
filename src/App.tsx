@@ -254,6 +254,7 @@ function App() {
     const unsubs = [
       events.wsStatus.listen((e) => setStatus(e.payload)),
       events.clipReceived.listen(() => { refreshClips(); refreshSources(); }),
+      events.remoteClipReceived.listen(() => { refreshClips(); refreshSources(); }),
       events.clipDeleted.listen(() => { refreshClips(); refreshSources(); }),
       events.clipPinned.listen(() => { refreshClips(); }),
       events.newSourceDetected.listen((e) => {
@@ -262,6 +263,50 @@ function App() {
     ];
     return () => { unsubs.forEach((p) => p.then((f) => f())); };
   }, [refreshClips, refreshSources]);
+
+  // OS notification when a clip arrives from another device. The per-source
+  // toggle in DevicesPanel (Alerts on/off) gates this — defaults to on.
+  // Permission is requested lazily on first incoming clip rather than at
+  // launch so users who never receive remote clips aren't prompted.
+  useEffect(() => {
+    let cancelled = false;
+    let unsub: (() => void) | null = null;
+    let permissionChecked = false;
+    let permissionGranted = false;
+
+    (async () => {
+      unsub = await events.remoteClipReceived.listen(async (e) => {
+        const clip = e.payload;
+        try {
+          const enabled = await unwrap(commands.getSourceAlertEnabled(clip.source));
+          if (!enabled) return;
+        } catch {
+          return;
+        }
+        if (cancelled) return;
+        if (!permissionChecked) {
+          permissionChecked = true;
+          let granted = await isPermissionGranted();
+          if (!granted) {
+            const result = await requestPermission();
+            granted = result === 'granted';
+          }
+          permissionGranted = granted;
+        }
+        if (!permissionGranted || cancelled) return;
+        const names = loadMachineDisplayNames();
+        const sourceLabel = clip.source.replace(/^remote:/, '');
+        const title = names[clip.source] ?? sourceLabel;
+        const body =
+          clip.content_type === 'image'
+            ? `New image · ${clip.byte_size.toLocaleString()} B`
+            : `New clipboard · ${clip.byte_size.toLocaleString()} B`;
+        sendNotification({ title, body });
+      });
+    })();
+
+    return () => { cancelled = true; unsub?.(); };
+  }, []);
 
   useEffect(() => {
     const unsubBlur = getCurrentWindow().listen('tauri://blur', () => {
