@@ -413,8 +413,8 @@ pub fn run() {
                     loop {
                         let updated =
                             crate::update_check::fetch_and_cache(app_for_refresh.clone()).await;
-                        let _ = crate::events::LatestVersionsUpdated(updated)
-                            .emit(&app_for_refresh);
+                        let _ =
+                            crate::events::LatestVersionsUpdated(updated).emit(&app_for_refresh);
                         tokio::time::sleep(std::time::Duration::from_secs(6 * 3600)).await;
                     }
                 });

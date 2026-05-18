@@ -225,11 +225,7 @@ mod tests {
     #[test]
     fn unknown_client_type_is_unknown() {
         assert_eq!(
-            compare(
-                Some("0.1.5"),
-                Some("chrome"),
-                &latest("v0.1.8", "v0.1.7")
-            ),
+            compare(Some("0.1.5"), Some("chrome"), &latest("v0.1.8", "v0.1.7")),
             VersionStatus::Unknown,
         );
     }
@@ -252,11 +248,7 @@ mod tests {
         // "dev-build" is neither plain semver nor pre-release tagged
         // semver, so we refuse to compare.
         assert_eq!(
-            compare(
-                Some("dev-build"),
-                Some("cli"),
-                &latest("v0.1.8", "v0.1.7")
-            ),
+            compare(Some("dev-build"), Some("cli"), &latest("v0.1.8", "v0.1.7")),
             VersionStatus::Unknown,
         );
     }
