@@ -204,7 +204,7 @@ fn handle_text_clip(
                     "clipboard: pushed text clip {} ({} bytes)",
                     clip_id, byte_size
                 );
-                let payload = clip_received_stub(&clip_id, &source, byte_size);
+                let payload = clip_received_stub(&clip_id, &source, byte_size, "text/plain");
                 let _ = crate::events::ClipReceived(payload).emit(&app);
             }
             Err(e) => {
@@ -215,19 +215,21 @@ fn handle_text_clip(
 }
 
 /// Build a minimal `LocalClip` payload for the `ClipReceived` event. The React
-/// listener uses this only as a refresh trigger (it re-fetches via `list_clips`
-/// in the handler), so we do not need to round-trip every field.
-fn clip_received_stub(
+/// listener uses `source` to look up per-device alert settings and otherwise
+/// treats the payload as a refresh trigger (it re-fetches via `list_clips` in
+/// the handler), so the other fields are stubbed.
+pub(crate) fn clip_received_stub(
     clip_id: &str,
     source: &str,
     byte_size: i64,
+    content_type: &str,
 ) -> crate::commands::clips::LocalClip {
     let now_secs = chrono::Utc::now().timestamp();
     crate::commands::clips::LocalClip {
         id: clip_id.to_string(),
         user_id: String::new(),
         content: String::new(),
-        content_type: "text/plain".to_string(),
+        content_type: content_type.to_string(),
         source: source.to_string(),
         label: String::new(),
         byte_size,

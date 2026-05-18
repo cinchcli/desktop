@@ -14,6 +14,14 @@ pub struct WsStatus(pub String);
 #[derive(Clone, Serialize, Deserialize, Type, Event)]
 pub struct ClipReceived(pub LocalClip);
 
+/// Fired when a clip arrives from another device via the relay WebSocket
+/// (i.e., delivered by `client_core::sync::Writer`'s on_new_clip callback).
+/// Distinct from `ClipReceived` (which fires for locally-captured clips on
+/// this device) so the React layer can trigger per-source desktop alerts
+/// without a local-vs-remote heuristic.
+#[derive(Clone, Serialize, Deserialize, Type, Event)]
+pub struct RemoteClipReceived(pub LocalClip);
+
 #[derive(Clone, Serialize, Deserialize, Type, Event)]
 pub struct ClipDeleted(pub String);
 

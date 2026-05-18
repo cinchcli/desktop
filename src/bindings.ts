@@ -151,6 +151,7 @@ export const events = {
 	imageDownloadFailed: makeEvent<ImageDownloadFailed>("image-download-failed"),
 	newSourceDetected: makeEvent<NewSourceDetected>("new-source-detected"),
 	offlineQueueDropped: makeEvent<OfflineQueueDropped>("offline-queue-dropped"),
+	remoteClipReceived: makeEvent<RemoteClipReceived>("remote-clip-received"),
 	sshPairMarkerFound: makeEvent<SshPairMarkerFound>("ssh-pair-marker-found"),
 	wsStatus: makeEvent<WsStatus>("ws-status"),
 };
@@ -300,6 +301,15 @@ export type PendingDeviceCode = {
 	// Unix timestamp (seconds) when the request arrived at the relay.
 	requested_at: number,
 };
+
+/**
+ *  Fired when a clip arrives from another device via the relay WebSocket
+ *  (i.e., delivered by `client_core::sync::Writer`'s on_new_clip callback).
+ *  Distinct from `ClipReceived` (which fires for locally-captured clips on
+ *  this device) so the React layer can trigger per-source desktop alerts
+ *  without a local-vs-remote heuristic.
+ */
+export type RemoteClipReceived = LocalClip;
 
 /**
  *  Settings-pane retention config (plan 01-06).

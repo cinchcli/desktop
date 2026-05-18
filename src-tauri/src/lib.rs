@@ -38,6 +38,14 @@ pub type LocalPusherHandle = Arc<Mutex<Option<client_core::sync::LocalPusher>>>;
 
 pub type PreviousAppPid = Arc<Mutex<Option<i32>>>;
 
+/// Sender side of the channel that forwards remote `NewClip` notifications
+/// from `client_core::sync::Writer`'s `on_new_clip` callback into Tauri's
+/// event bus. Stored in Tauri state so `restart_writer` can rebuild the
+/// callback with the same delivery target after a credential swap.
+pub(crate) struct ClipNotifierTx(
+    pub(crate) tokio::sync::mpsc::UnboundedSender<client_core::protocol::Clip>,
+);
+
 pub fn make_specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
@@ -88,6 +96,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             events::AuthStateChanged,
             events::WsStatus,
             events::ClipReceived,
+            events::RemoteClipReceived,
             events::ClipDeleted,
             events::NewSourceDetected,
             events::ImageDownloadFailed,
@@ -173,6 +182,13 @@ pub fn run() {
     // so a reader-mode desktop (lock held by CLI/another desktop) can still
     // push locally-detected clips. Both handles are swapped together by
     // `restart_writer` on credential changes.
+    // Build the NewClip notifier channel before Writer::start so the initial
+    // writer — spawned synchronously below, before Tauri's AppHandle exists —
+    // can deliver remote clip arrivals to a consumer task that we'll spawn
+    // inside `.setup()` once `app.handle()` is available.
+    let (clip_notif_tx, clip_notif_rx) =
+        tokio::sync::mpsc::unbounded_channel::<client_core::protocol::Clip>();
+
     let (writer_handle, local_pusher_handle): (WriterHandle, LocalPusherHandle) = {
         if is_configured && !config.token.is_empty() && !config.relay_url.is_empty() {
             let enc_key = client_core::credstore::read_encryption_key(&config.user_id);
@@ -193,6 +209,10 @@ pub fn run() {
                     let store_for_writer = shared_store.clone();
                     let lock_p = client_core::store::lock_path()
                         .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/cinch.lock"));
+                    let initial_cb_tx = clip_notif_tx.clone();
+                    let on_new_clip: client_core::sync::OnNewClipCallback = Arc::new(move |clip| {
+                        let _ = initial_cb_tx.send(clip.clone());
+                    });
                     let writer =
                         match tauri::async_runtime::block_on(client_core::sync::Writer::start(
                             store_for_writer,
@@ -200,6 +220,7 @@ pub fn run() {
                             ws_cfg,
                             lock_p,
                             client_core::sync::LockKind::Desktop,
+                            Some(on_new_clip),
                         )) {
                             Ok(Some(w)) => {
                                 info!("client-core sync::Writer started");
@@ -326,6 +347,7 @@ pub fn run() {
         // Phase 4: shared client-core Store, sync Writer, and LocalPusher
         .manage(shared_store)
         .manage(writer_handle)
+        .manage(ClipNotifierTx(clip_notif_tx.clone()))
         .manage(local_pusher_handle.clone())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -338,6 +360,27 @@ pub fn run() {
             specta_builder.mount_events(app);
 
             let handle = app.handle();
+
+            // Drain the NewClip notifier channel into Tauri's event bus. Both
+            // the initial Writer (built before `tauri::Builder`) and any
+            // Writer built by `restart_writer` push wire clips here; we map
+            // them to a stub `LocalClip` payload so the React side can look
+            // up alert settings by source and trigger an OS notification.
+            {
+                let app_for_consumer = handle.clone();
+                let mut rx = clip_notif_rx;
+                tauri::async_runtime::spawn(async move {
+                    while let Some(clip) = rx.recv().await {
+                        let payload = clipboard::monitor::clip_received_stub(
+                            &clip.clip_id,
+                            &clip.source,
+                            clip.byte_size,
+                            &clip.content_type,
+                        );
+                        let _ = crate::events::RemoteClipReceived(payload).emit(&app_for_consumer);
+                    }
+                });
+            }
 
             // Setup system tray
             tray::setup_tray(handle)?;
@@ -994,12 +1037,21 @@ pub(crate) async fn restart_writer(
     ws_status.set("connecting");
     relay_connected.store(false, Ordering::Relaxed);
 
+    // Forward NewClip notifications from the rebuilt Writer through the same
+    // mpsc channel that the consumer task spawned in `.setup` is draining,
+    // so per-source desktop alerts keep firing after a credential swap.
+    let cb_tx = app.state::<crate::ClipNotifierTx>().inner().0.clone();
+    let on_new_clip: client_core::sync::OnNewClipCallback = std::sync::Arc::new(move |clip| {
+        let _ = cb_tx.send(clip.clone());
+    });
+
     match client_core::sync::Writer::start(
         store,
         rest_arc,
         ws_cfg,
         lock_path,
         client_core::sync::LockKind::Desktop,
+        Some(on_new_clip),
     )
     .await
     .map_err(|e| e.to_string())?
