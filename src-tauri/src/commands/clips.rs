@@ -291,7 +291,7 @@ pub async fn pin_clip(
     let now_ms = chrono::Utc::now().timestamp_millis();
     queries::set_pinned(&store, &id, true, now_ms).map_err(|e| e.to_string())?;
     if let Ok((relay_url, token)) = resolve_active_creds(&mc) {
-        match client_core::http::RestClient::new(relay_url, token) {
+        match client_core::http::RestClient::new(relay_url, token, crate::build_client_info()) {
             Ok(client) => {
                 if let Err(e) = client.set_clip_pin(&id, true, note.as_deref()).await {
                     log::warn!("relay set_clip_pin failed for {}: {}", id, e);
@@ -315,7 +315,7 @@ pub async fn unpin_clip(
     let now_ms = chrono::Utc::now().timestamp_millis();
     queries::set_pinned(&store, &id, false, now_ms).map_err(|e| e.to_string())?;
     if let Ok((relay_url, token)) = resolve_active_creds(&mc) {
-        match client_core::http::RestClient::new(relay_url, token) {
+        match client_core::http::RestClient::new(relay_url, token, crate::build_client_info()) {
             Ok(client) => {
                 if let Err(e) = client.set_clip_pin(&id, false, None).await {
                     log::warn!("relay unpin_clip failed for {}: {}", id, e);
@@ -384,7 +384,7 @@ pub async fn delete_clip(
     // Best-effort relay deletion: propagate to other devices via clip_deleted broadcast.
     // If the relay is unreachable, log and continue — relay TTL will eventually expire the clip.
     if let Ok((relay_url, token)) = resolve_active_creds(&mc) {
-        match client_core::http::RestClient::new(relay_url, token) {
+        match client_core::http::RestClient::new(relay_url, token, crate::build_client_info()) {
             Ok(client) => {
                 if let Err(e) = client.delete_clip(&id).await {
                     log::warn!("relay delete_clip failed for {}: {}", id, e);
@@ -611,7 +611,7 @@ fn resolve_active_creds(mc: &State<'_, MultiConfigHandle>) -> Result<(String, St
 #[specta::specta]
 pub async fn list_devices(mc: State<'_, MultiConfigHandle>) -> Result<Vec<DeviceInfo>, String> {
     let (relay_url, token) = resolve_active_creds(&mc)?;
-    let client = client_core::http::RestClient::new(relay_url, token)
+    let client = client_core::http::RestClient::new(relay_url, token, crate::build_client_info())
         .map_err(|e| format!("build client: {}", e))?;
     client
         .list_devices()
@@ -627,7 +627,7 @@ pub async fn set_device_nickname(
     nickname: String,
 ) -> Result<(), String> {
     let (relay_url, token) = resolve_active_creds(&mc)?;
-    let client = client_core::http::RestClient::new(relay_url, token)
+    let client = client_core::http::RestClient::new(relay_url, token, crate::build_client_info())
         .map_err(|e| format!("build client: {}", e))?;
     client
         .set_device_nickname(&device_id, &nickname)
@@ -642,7 +642,7 @@ pub async fn revoke_device(
     device_id: String,
 ) -> Result<(), String> {
     let (relay_url, token) = resolve_active_creds(&mc)?;
-    let client = client_core::http::RestClient::new(relay_url, token)
+    let client = client_core::http::RestClient::new(relay_url, token, crate::build_client_info())
         .map_err(|e| format!("build client: {}", e))?;
     client
         .revoke_device(&device_id)

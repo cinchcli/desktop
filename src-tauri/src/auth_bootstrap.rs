@@ -52,8 +52,11 @@ pub(crate) async fn run_joiner_flow_with_privkey(
         .map(|b| format!("{:02x}", b))
         .collect();
 
-    let client = match client_core::http::RestClient::new(relay_url.to_string(), token.to_string())
-    {
+    let client = match client_core::http::RestClient::new(
+        relay_url.to_string(),
+        token.to_string(),
+        crate::build_client_info(),
+    ) {
         Ok(c) => c,
         Err(e) => {
             log::error!("auth_bootstrap: build client failed: {}", e);
