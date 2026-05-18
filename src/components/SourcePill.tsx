@@ -23,7 +23,7 @@ export function SourcePill({ source, nickname, colorSlot }: SourcePillProps) {
         color: fg,
         borderRadius: 9999,
         padding: '1px 8px',
-        maxWidth: 140,
+        maxWidth: 230,
         overflow: 'hidden',
         fontSize: 10,
         fontFamily: 'var(--font-mono)',

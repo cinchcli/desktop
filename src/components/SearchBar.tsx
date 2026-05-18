@@ -1,7 +1,8 @@
-import { forwardRef, useState, useCallback, type CSSProperties } from 'react';
+import { forwardRef, useEffect, useRef, useState, useCallback, type CSSProperties, type ReactNode } from 'react';
 import { C } from '../design';
-import { IconSearch, IconX, IconSun, IconMoon } from '../icons';
+import { IconSearch, IconX, IconSun, IconMoon, IconMonitor } from '../icons';
 import { CLIP_FILTERS, type ClipFilter } from '../lib/clipFilters';
+import { sourcePillVars, type SourceColorSlot } from '../lib/sourceColor';
 
 const FILTER_HINTS: Record<ClipFilter, string> = {
   all:   'show everything',
@@ -11,28 +12,91 @@ const FILTER_HINTS: Record<ClipFilter, string> = {
   url:   'links',
 };
 
+export interface DeviceOption {
+  source: string;
+  label: string;
+  count: number;
+  colorSlot?: SourceColorSlot;
+}
+
+type ThemeMode = 'light' | 'dark' | 'system';
+
 interface SearchBarProps {
   value: string;
   onChange: (next: string) => void;
   onClear: () => void;
-  theme: 'light' | 'dark';
-  onToggleTheme: () => void;
+  themeMode: ThemeMode;
+  onSetThemeMode: (mode: ThemeMode) => void;
   onMouseDown: (e: React.MouseEvent) => void;
   activeFilter: ClipFilter;
   onFilterChange: (f: ClipFilter) => void;
+  deviceOptions: DeviceOption[];
+  selectedSource: string | null;
+  onSourceChange: (source: string | null) => void;
 }
 
+const THEME_MODES: ThemeMode[] = ['light', 'dark', 'system'];
+
+const THEME_LABEL: Record<ThemeMode, string> = {
+  light:  'Light',
+  dark:   'Dark',
+  system: 'System',
+};
+
+const THEME_ICON: Record<ThemeMode, (size: number) => ReactNode> = {
+  light:  (s) => <IconSun size={s} />,
+  dark:   (s) => <IconMoon size={s} />,
+  system: (s) => <IconMonitor size={s} />,
+};
+
 export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
-  ({ value, onChange, onClear, theme, onToggleTheme, onMouseDown, activeFilter, onFilterChange }, ref) => {
+  ({
+    value, onChange, onClear, themeMode, onSetThemeMode, onMouseDown,
+    activeFilter, onFilterChange,
+    deviceOptions, selectedSource, onSourceChange,
+  }, ref) => {
+    const [themeMenuOpen, setThemeMenuOpen] = useState(false);
+    const themeMenuRef = useRef<HTMLDivElement | null>(null);
+
+    useEffect(() => {
+      if (!themeMenuOpen) return;
+      const onPointer = (e: MouseEvent) => {
+        if (themeMenuRef.current && !themeMenuRef.current.contains(e.target as Node)) {
+          setThemeMenuOpen(false);
+        }
+      };
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') setThemeMenuOpen(false);
+      };
+      document.addEventListener('mousedown', onPointer);
+      document.addEventListener('keydown', onKey);
+      return () => {
+        document.removeEventListener('mousedown', onPointer);
+        document.removeEventListener('keydown', onKey);
+      };
+    }, [themeMenuOpen]);
+
     const [dropdownOpen, setDropdownOpen] = useState(false);
     const [dropdownQuery, setDropdownQuery] = useState('');
     const [highlightedFilter, setHighlightedFilter] = useState<ClipFilter>('all');
+
+    const [deviceDropdownOpen, setDeviceDropdownOpen] = useState(false);
+    const [deviceDropdownQuery, setDeviceDropdownQuery] = useState('');
+    const [highlightedDevice, setHighlightedDevice] = useState<string | null>(null);
+
+    const selectedDevice = deviceOptions.find((d) => d.source === selectedSource) ?? null;
 
     const matchingFilters = CLIP_FILTERS.filter(
       f => dropdownQuery === '' || f.startsWith(dropdownQuery)
     );
 
+    const matchingDevices = deviceOptions.filter(
+      d => deviceDropdownQuery === '' || d.label.toLowerCase().startsWith(deviceDropdownQuery)
+    );
+
     const openDropdown = useCallback((preHighlight: ClipFilter = 'all') => {
+      setDeviceDropdownOpen(false);
+      setDeviceDropdownQuery('');
       setDropdownOpen(true);
       setDropdownQuery('');
       setHighlightedFilter(preHighlight);
@@ -43,57 +107,113 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
       setDropdownQuery('');
     }, []);
 
+    const openDeviceDropdown = useCallback((preHighlight: string | null) => {
+      setDropdownOpen(false);
+      setDropdownQuery('');
+      setDeviceDropdownOpen(true);
+      setDeviceDropdownQuery('');
+      setHighlightedDevice(preHighlight ?? deviceOptions[0]?.source ?? null);
+    }, [deviceOptions]);
+
+    const closeDeviceDropdown = useCallback(() => {
+      setDeviceDropdownOpen(false);
+      setDeviceDropdownQuery('');
+    }, []);
+
     const selectFilter = useCallback((f: ClipFilter) => {
       onFilterChange(f);
       closeDropdown();
     }, [onFilterChange, closeDropdown]);
 
+    const selectDevice = useCallback((source: string | null) => {
+      onSourceChange(source);
+      closeDeviceDropdown();
+    }, [onSourceChange, closeDeviceDropdown]);
+
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const raw = e.target.value;
       const hashIdx = raw.indexOf('#');
-      if (hashIdx !== -1) {
-        openDropdown(CLIP_FILTERS[0]);
-        onChange(raw.slice(0, hashIdx));
+      const atIdx = raw.indexOf('@');
+      // Whichever sigil appears first wins, mirroring the existing # behavior.
+      const firstSigilIdx =
+        hashIdx === -1 ? atIdx :
+        atIdx  === -1 ? hashIdx :
+        Math.min(hashIdx, atIdx);
+      if (firstSigilIdx !== -1) {
+        const isHash = raw[firstSigilIdx] === '#';
+        if (isHash) openDropdown(CLIP_FILTERS[0]);
+        else openDeviceDropdown(deviceOptions[0]?.source ?? null);
+        onChange(raw.slice(0, firstSigilIdx));
         return;
       }
       onChange(raw);
     };
 
+    // Keys consumed by an open dropdown must be hidden from the window-level
+    // keydown listener in App.tsx (Enter copies the selected clip and hides
+    // the window, ArrowUp/Down moves clip selection). React's preventDefault
+    // doesn't block native bubbling, so we stop the native event explicitly.
+    const consume = (e: React.KeyboardEvent) => {
+      e.preventDefault();
+      e.nativeEvent.stopImmediatePropagation();
+    };
+
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-      // Remove chip on Backspace when text is empty and no dropdown
-      if (e.key === 'Backspace' && !dropdownOpen && value === '' && activeFilter !== 'all') {
-        onFilterChange('all');
+      // Backspace on empty input removes the closest chip: type first, then source.
+      if (
+        e.key === 'Backspace' &&
+        !dropdownOpen &&
+        !deviceDropdownOpen &&
+        value === ''
+      ) {
+        if (activeFilter !== 'all') {
+          onFilterChange('all');
+          return;
+        }
+        if (selectedSource !== null) {
+          onSourceChange(null);
+          return;
+        }
+      }
+
+      if (dropdownOpen) {
+        handleFilterDropdownKey(e);
         return;
       }
-      if (!dropdownOpen) return;
+      if (deviceDropdownOpen) {
+        handleDeviceDropdownKey(e);
+        return;
+      }
+    };
 
+    const handleFilterDropdownKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
       const idx = matchingFilters.indexOf(highlightedFilter);
       const safeIdx = idx === -1 ? 0 : idx;
 
       if (e.key === 'ArrowDown') {
-        e.preventDefault();
+        consume(e);
         if (matchingFilters.length === 0) return;
         setHighlightedFilter(matchingFilters[(safeIdx + 1) % matchingFilters.length]);
         return;
       }
       if (e.key === 'ArrowUp') {
-        e.preventDefault();
+        consume(e);
         if (matchingFilters.length === 0) return;
         setHighlightedFilter(matchingFilters[(safeIdx - 1 + matchingFilters.length) % matchingFilters.length]);
         return;
       }
       if (e.key === 'Enter') {
-        e.preventDefault();
+        consume(e);
         selectFilter(highlightedFilter);
         return;
       }
       if (e.key === 'Escape') {
-        e.preventDefault();
+        consume(e);
         closeDropdown();
         return;
       }
       if (e.key === 'Backspace') {
-        e.preventDefault();
+        consume(e);
         if (dropdownQuery.length > 0) {
           const q = dropdownQuery.slice(0, -1);
           setDropdownQuery(q);
@@ -105,7 +225,7 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
         return;
       }
       if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        e.preventDefault();
+        consume(e);
         const q = dropdownQuery + e.key.toLowerCase();
         setDropdownQuery(q);
         const first = CLIP_FILTERS.find(f => f.startsWith(q)) ?? highlightedFilter;
@@ -113,9 +233,82 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
       }
     };
 
+    const handleDeviceDropdownKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+      const currentIdx = matchingDevices.findIndex((d) => d.source === highlightedDevice);
+      const safeIdx = currentIdx === -1 ? 0 : currentIdx;
+
+      if (e.key === 'ArrowDown') {
+        consume(e);
+        if (matchingDevices.length === 0) return;
+        setHighlightedDevice(matchingDevices[(safeIdx + 1) % matchingDevices.length].source);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        consume(e);
+        if (matchingDevices.length === 0) return;
+        setHighlightedDevice(matchingDevices[(safeIdx - 1 + matchingDevices.length) % matchingDevices.length].source);
+        return;
+      }
+      if (e.key === 'Enter') {
+        consume(e);
+        if (highlightedDevice) selectDevice(highlightedDevice);
+        return;
+      }
+      if (e.key === 'Escape') {
+        consume(e);
+        closeDeviceDropdown();
+        return;
+      }
+      if (e.key === 'Backspace') {
+        consume(e);
+        if (deviceDropdownQuery.length > 0) {
+          const q = deviceDropdownQuery.slice(0, -1);
+          setDeviceDropdownQuery(q);
+          const first = deviceOptions.find(d => q === '' || d.label.toLowerCase().startsWith(q));
+          if (first) setHighlightedDevice(first.source);
+        } else {
+          closeDeviceDropdown();
+        }
+        return;
+      }
+      if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        consume(e);
+        const q = deviceDropdownQuery + e.key.toLowerCase();
+        setDeviceDropdownQuery(q);
+        const first = deviceOptions.find(d => d.label.toLowerCase().startsWith(q));
+        if (first) setHighlightedDevice(first.source);
+      }
+    };
+
+    const placeholder =
+      activeFilter !== 'all' || selectedSource !== null
+        ? ''
+        : 'Search clips…  # type, @ device';
+
     return (
       <div style={S.bar} onMouseDown={onMouseDown} data-testid="search-bar">
         <span style={S.glass}><IconSearch size={14} /></span>
+
+        {selectedDevice && (() => {
+          const { bg, fg } = sourcePillVars(selectedDevice.source, selectedDevice.colorSlot);
+          return (
+            <span
+              style={{ ...S.chip, background: bg, color: fg, border: 'none' }}
+              data-testid="device-chip"
+              onClick={() => openDeviceDropdown(selectedDevice.source)}
+            >
+              <span style={{ ...S.chipDot, background: fg }} />
+              {selectedDevice.label}
+              <span
+                style={S.chipX}
+                data-testid="device-chip-x"
+                onClick={(e) => { e.stopPropagation(); onSourceChange(null); }}
+              >
+                ✕
+              </span>
+            </span>
+          );
+        })()}
 
         {activeFilter !== 'all' && (
           <span
@@ -141,7 +334,7 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
           value={value}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
-          placeholder={activeFilter === 'all' ? 'Search clips…  # to filter' : ''}
+          placeholder={placeholder}
           aria-label="Search clips"
           spellCheck={false}
           autoFocus
@@ -154,16 +347,46 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
           </button>
         )}
         <kbd style={S.kbd}>⌘F /</kbd>
-        <button
-          type="button"
-          onClick={onToggleTheme}
-          aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-          title={theme === 'dark' ? 'Light theme' : 'Dark theme'}
-          className="icon-btn"
-          style={S.iconBtn}
-        >
-          {theme === 'dark' ? <IconSun size={14} /> : <IconMoon size={14} />}
-        </button>
+        <div ref={themeMenuRef} style={S.themeAnchor}>
+          <button
+            type="button"
+            onClick={() => setThemeMenuOpen((v) => !v)}
+            aria-label={`Theme: ${THEME_LABEL[themeMode]}`}
+            aria-haspopup="menu"
+            aria-expanded={themeMenuOpen}
+            title={`Theme: ${THEME_LABEL[themeMode]}`}
+            className="icon-btn"
+            style={S.iconBtn}
+            data-testid="theme-toggle"
+          >
+            {THEME_ICON[themeMode](14)}
+          </button>
+          {themeMenuOpen && (
+            <div style={S.themeMenu} role="menu" data-testid="theme-menu">
+              {THEME_MODES.map((m) => {
+                const active = m === themeMode;
+                return (
+                  <div
+                    key={m}
+                    role="menuitemradio"
+                    aria-checked={active}
+                    data-testid={`theme-option-${m}`}
+                    style={{ ...S.themeItem, ...(active ? S.themeItemHL : {}) }}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      onSetThemeMode(m);
+                      setThemeMenuOpen(false);
+                    }}
+                  >
+                    <span style={S.themeIcon}>{THEME_ICON[m](13)}</span>
+                    <span style={S.themeLabel}>{THEME_LABEL[m]}</span>
+                    {active && <span style={S.themeCheck} aria-hidden="true">✓</span>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
         {dropdownOpen && (
           <div style={S.dropdown} data-testid="filter-dropdown">
@@ -187,6 +410,40 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {deviceDropdownOpen && (
+          <div style={S.dropdown} data-testid="device-dropdown">
+            {/* No "all devices" entry — the chip's ✕ and Backspace-on-empty
+                already handle "clear filter", and listing it inside the
+                dropdown when no chip is set is just noise. */}
+            {deviceOptions.map((d) => {
+              const matches = deviceDropdownQuery === '' || d.label.toLowerCase().startsWith(deviceDropdownQuery);
+              const { bg, fg } = sourcePillVars(d.source, d.colorSlot);
+              return (
+                <div
+                  key={d.source}
+                  style={{
+                    ...S.dropItem,
+                    ...(highlightedDevice === d.source ? S.dropItemHL : {}),
+                    ...(!matches ? S.dropItemDim : {}),
+                  }}
+                  aria-selected={highlightedDevice === d.source}
+                  data-testid={`device-option-${d.source}`}
+                  onMouseDown={(e) => { e.preventDefault(); selectDevice(d.source); }}
+                >
+                  <span style={{ ...S.dropDot, background: bg, boxShadow: `inset 0 0 0 1px ${fg}` }} />
+                  {d.label}
+                  <span style={S.dropHint}>{d.count} clip{d.count === 1 ? '' : 's'}</span>
+                </div>
+              );
+            })}
+            {deviceOptions.length === 0 && (
+              <div style={{ ...S.dropItem, opacity: 0.55 }} data-testid="device-option-empty">
+                no devices yet
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -276,9 +533,14 @@ const S: Record<string, CSSProperties> = {
     top: '100%',
     left: 0,
     right: 0,
-    background: C.card2,
+    // `C.card2` (var(--surface-2)) is a 5%-alpha elevation overlay in dark
+    // mode — fine for inline surfaces like the Rail, but invisible when the
+    // dropdown floats over the ClipList. `C.card` (var(--surface)) is opaque
+    // in both themes, and the box-shadow gives the needed elevation cue.
+    background: C.card,
     border: `1px solid ${C.border}`,
     borderTop: 'none',
+    boxShadow: '0 6px 16px rgba(0, 0, 0, 0.22), 0 1px 3px rgba(0, 0, 0, 0.10)',
     zIndex: 100,
     padding: '3px 0',
   },
@@ -315,4 +577,49 @@ const S: Record<string, CSSProperties> = {
   dot_image: { background: 'var(--success)' },
   dot_code:  { background: 'var(--warning)' },
   dot_url:   { background: 'var(--accent)' },
+  themeAnchor: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  themeMenu: {
+    position: 'absolute',
+    top: 'calc(100% + 6px)',
+    right: 0,
+    width: 180,
+    background: C.card2,
+    border: `1px solid ${C.border}`,
+    borderRadius: 6,
+    padding: '4px 0',
+    zIndex: 110,
+    boxShadow: '0 8px 20px rgba(0,0,0,0.28)',
+  },
+  themeItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    padding: '7px 12px',
+    fontSize: 12,
+    fontFamily: 'var(--font-mono)',
+    cursor: 'pointer',
+    color: C.t2,
+    userSelect: 'none',
+  },
+  themeItemHL: {
+    color: C.t1,
+  },
+  themeIcon: {
+    display: 'inline-flex',
+    width: 16,
+    justifyContent: 'center',
+    color: C.t2,
+  },
+  themeLabel: {
+    flex: 1,
+  },
+  themeCheck: {
+    fontSize: 12,
+    color: C.t1,
+    marginLeft: 'auto',
+  },
 };
