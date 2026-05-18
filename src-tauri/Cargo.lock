@@ -678,6 +678,7 @@ dependencies = [
  "objc",
  "reqwest 0.12.28",
  "rusqlite",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -703,9 +704,9 @@ dependencies = [
 
 [[package]]
 name = "cinchcli-core"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98dd0b4f7983d3f85badf355ebd055ccf7f7b7ce7bb6735c94e4db3d289d2aac"
+checksum = "ad841a76b78b16fd759b66018e9b5ad9e7ec5fdcd7aa4c09ceaf9dc01b8ed24f"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
