@@ -38,6 +38,18 @@ pub type LocalPusherHandle = Arc<Mutex<Option<client_core::sync::LocalPusher>>>;
 
 pub type PreviousAppPid = Arc<Mutex<Option<i32>>>;
 
+/// Builds the `ClientInfo` block that identifies this desktop binary to
+/// `cinch-core`'s REST + WS clients. Cinch-core attaches it as HTTP
+/// headers and as the WS `client_hello` payload, so the relay can
+/// persist the per-device version row used by `cinch devices` and the
+/// desktop's version badges.
+pub fn build_client_info() -> client_core::version::ClientInfo {
+    client_core::version::ClientInfo {
+        client_type: client_core::version::ClientType::Desktop,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    }
+}
+
 /// Sender side of the channel that forwards remote `NewClip` notifications
 /// from `client_core::sync::Writer`'s `on_new_clip` callback into Tauri's
 /// event bus. Stored in Tauri state so `restart_writer` can rebuild the
@@ -196,8 +208,13 @@ pub fn run() {
                 relay_url: config.relay_url.clone(),
                 token: config.token.clone(),
                 encryption_key: enc_key,
+                client_info: Some(build_client_info()),
             };
-            match client_core::http::RestClient::new(config.relay_url.clone(), config.token.clone())
+            match client_core::http::RestClient::new(
+                config.relay_url.clone(),
+                config.token.clone(),
+                build_client_info(),
+            )
             {
                 Ok(rest_client) => {
                     let rest_arc = Arc::new(rest_client);
@@ -1001,10 +1018,15 @@ pub(crate) async fn restart_writer(
         relay_url: relay_url.to_string(),
         token: token.to_string(),
         encryption_key: enc_key,
+        client_info: Some(build_client_info()),
     };
 
-    let rest = client_core::http::RestClient::new(relay_url.to_string(), token.to_string())
-        .map_err(|e| e.to_string())?;
+    let rest = client_core::http::RestClient::new(
+        relay_url.to_string(),
+        token.to_string(),
+        build_client_info(),
+    )
+    .map_err(|e| e.to_string())?;
     let rest_arc = std::sync::Arc::new(rest);
 
     let store: crate::SharedStore = app.state::<crate::SharedStore>().inner().clone();

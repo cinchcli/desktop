@@ -44,7 +44,12 @@ mod tests {
                 *last = Some(now);
                 drop(last);
                 let client =
-                    client_core::http::RestClient::new(relay.clone(), token.to_string()).unwrap();
+                    client_core::http::RestClient::new(
+                        relay.clone(),
+                        token.to_string(),
+                        crate::build_client_info(),
+                    )
+                    .unwrap();
                 client.retry_key_bundle().await.ok();
             }
         }
@@ -59,7 +64,12 @@ mod tests {
             drop(last);
             if !suppressed {
                 let client =
-                    client_core::http::RestClient::new(relay.clone(), token.to_string()).unwrap();
+                    client_core::http::RestClient::new(
+                        relay.clone(),
+                        token.to_string(),
+                        crate::build_client_info(),
+                    )
+                    .unwrap();
                 client.retry_key_bundle().await.ok();
             }
         }
@@ -85,7 +95,9 @@ mod tests {
         let token = "tok";
 
         let fire = |relay: String, token: String| async move {
-            let client = client_core::http::RestClient::new(relay, token).unwrap();
+            let client =
+                client_core::http::RestClient::new(relay, token, crate::build_client_info())
+                    .unwrap();
             client.retry_key_bundle().await.ok();
         };
 

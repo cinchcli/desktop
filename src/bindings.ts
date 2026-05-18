@@ -239,6 +239,18 @@ export type Device = {
 	public_key?: string,
 	public_key_fingerprint?: string,
 	machine_id?: string | null,
+	/**
+	 *  Semver string of the client binary as reported via WS client_hello or
+	 *  X-Cinch-Client-Version. Empty if the device has not reported yet.
+	 */
+	client_version?: string | null,
+	/**
+	 *  "cli" or "desktop". Determines which GitHub repo's latest release to
+	 *  compare against. Empty if not reported.
+	 */
+	client_type?: string | null,
+	// RFC3339 timestamp of the last version report.
+	client_version_at?: string | null,
 };
 
 /**
