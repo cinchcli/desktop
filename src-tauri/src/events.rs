@@ -8,6 +8,13 @@ use crate::commands::clips::LocalClip;
 #[derive(Clone, Serialize, Deserialize, Type, Event)]
 pub struct AuthStateChanged(pub AuthState);
 
+/// Fired when the desktop's background updater refreshes the cached
+/// latest-release tags. React's `useLatestVersions` hook subscribes to
+/// this so version badges re-render the moment the new tag lands,
+/// without waiting for the next mount.
+#[derive(Clone, Serialize, Deserialize, Type, Event)]
+pub struct LatestVersionsUpdated(pub crate::update_check::LatestVersions);
+
 #[derive(Clone, Serialize, Deserialize, Type, Event)]
 pub struct WsStatus(pub String);
 

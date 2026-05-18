@@ -8,6 +8,7 @@ pub mod protocol;
 mod store;
 mod sync_status;
 mod tray;
+pub mod update_check;
 
 #[cfg(test)]
 mod tests;
@@ -103,6 +104,9 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::auth::approve_remote_login,
             commands::auth::deny_remote_login,
             commands::relays::pair_with_token,
+            commands::updater::get_latest_versions,
+            commands::updater::get_device_version_status,
+            commands::updater::run_self_update,
         ])
         .events(collect_events![
             events::AuthStateChanged,
@@ -120,6 +124,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             events::ClipDecryptFailed,
             events::ClipPinned,
             events::DeviceCodePending,
+            events::LatestVersionsUpdated,
         ])
 }
 
@@ -214,8 +219,7 @@ pub fn run() {
                 config.relay_url.clone(),
                 config.token.clone(),
                 build_client_info(),
-            )
-            {
+            ) {
                 Ok(rest_client) => {
                     let rest_arc = Arc::new(rest_client);
                     let pusher = client_core::sync::LocalPusher::new(
@@ -395,6 +399,23 @@ pub fn run() {
                             &clip.content_type,
                         );
                         let _ = crate::events::RemoteClipReceived(payload).emit(&app_for_consumer);
+                    }
+                });
+            }
+
+            // Periodic GitHub Releases refresh. Drives the per-device
+            // version badge: the first iteration fires on launch and
+            // every 6 hours after, so a long-running session always has
+            // a current cache without the user clicking anything.
+            {
+                let app_for_refresh = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        let updated =
+                            crate::update_check::fetch_and_cache(app_for_refresh.clone()).await;
+                        let _ = crate::events::LatestVersionsUpdated(updated)
+                            .emit(&app_for_refresh);
+                        tokio::time::sleep(std::time::Duration::from_secs(6 * 3600)).await;
                     }
                 });
             }

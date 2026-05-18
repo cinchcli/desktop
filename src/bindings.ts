@@ -135,6 +135,9 @@ export const commands = {
 	 *  Clears any existing relay and replaces it with the new one.
 	 */
 	pairWithToken: (req: PairWithTokenRequest) => typedError<PairWithTokenResult, string>(__TAURI_INVOKE("pair_with_token", { req })),
+	getLatestVersions: () => __TAURI_INVOKE<LatestVersions>("get_latest_versions"),
+	getDeviceVersionStatus: (reported: string | null, clientType: string | null, latest: LatestVersions) => __TAURI_INVOKE<VersionStatus>("get_device_version_status", { reported, clientType, latest }),
+	runSelfUpdate: () => typedError<null, string>(__TAURI_INVOKE("run_self_update")),
 };
 
 /** Events */
@@ -149,6 +152,7 @@ export const events = {
 	deviceCodePending: makeEvent<DeviceCodePending>("device-code-pending"),
 	imageDownloadComplete: makeEvent<ImageDownloadComplete>("image-download-complete"),
 	imageDownloadFailed: makeEvent<ImageDownloadFailed>("image-download-failed"),
+	latestVersionsUpdated: makeEvent<LatestVersionsUpdated>("latest-versions-updated"),
 	newSourceDetected: makeEvent<NewSourceDetected>("new-source-detected"),
 	offlineQueueDropped: makeEvent<OfflineQueueDropped>("offline-queue-dropped"),
 	remoteClipReceived: makeEvent<RemoteClipReceived>("remote-clip-received"),
@@ -264,6 +268,26 @@ export type ImageDownloadComplete = string;
 
 export type ImageDownloadFailed = string;
 
+/**
+ *  Latest published release tag for each binary, plus the unix
+ *  timestamp at which the desktop last refreshed it. Frontend reads
+ *  this verbatim to decide whether to render the "Update" affordance.
+ */
+export type LatestVersions = {
+	cli: string | null,
+	desktop: string | null,
+	// Unix seconds.
+	fetched_at: number | null,
+};
+
+/**
+ *  Fired when the desktop's background updater refreshes the cached
+ *  latest-release tags. React's `useLatestVersions` hook subscribes to
+ *  this so version badges re-render the moment the new tag lands,
+ *  without waiting for the next mount.
+ */
+export type LatestVersionsUpdated = LatestVersions;
+
 export type LocalClip = {
 	id: string,
 	user_id: string,
@@ -360,6 +384,14 @@ export type SourceSetting = {
 export type SshPairMarkerFound = {
 	url: string,
 };
+
+/**
+ *  Outcome of comparing a single device's reported version against the
+ *  cached latest tag for that client type. Anything we cannot parse or
+ *  classify lands in `Unknown` — never `UpToDate` — so the badge stays
+ *  neutral until we have real evidence.
+ */
+export type VersionStatus = "UpToDate" | "Outdated" | "Unknown";
 
 export type WsStatus = string;
 
