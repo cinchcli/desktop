@@ -192,19 +192,21 @@ fn handle_text_clip(
         }
     };
 
+    let content_type = client_core::classify::detect(&text);
     let raw = text.into_bytes();
     let byte_size = raw.len() as i64;
     let source = source.to_string();
     let app = app.clone();
 
     tauri::async_runtime::spawn(async move {
-        match pusher.push_text(raw, &source, "").await {
+        match pusher.push_text(raw, &source, "", content_type).await {
             Ok(clip_id) => {
                 info!(
                     "clipboard: pushed text clip {} ({} bytes)",
                     clip_id, byte_size
                 );
-                let payload = clip_received_stub(&clip_id, &source, byte_size, "text/plain");
+                let payload =
+                    clip_received_stub(&clip_id, &source, byte_size, content_type.as_wire());
                 let _ = crate::events::ClipReceived(payload).emit(&app);
             }
             Err(e) => {

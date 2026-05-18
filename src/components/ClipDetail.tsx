@@ -38,12 +38,12 @@ export function ClipDetail({
   }
 
   const isImage = clip.content_type === 'image' && !!clip.media_path;
+  const trimmed = clip.content.trim();
   const isJsonish =
-    clip.content_type === 'json' ||
-    (clip.content.trim().startsWith('{') && clip.content.trim().endsWith('}')) ||
-    (clip.content.trim().startsWith('[') && clip.content.trim().endsWith(']'));
-  // Prose for free-form text only; everything technical (code/json/url/error)
-  // stays in mono so structure-bearing whitespace and punctuation read correctly.
+    (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+    (trimmed.startsWith('[') && trimmed.endsWith(']'));
+  // Prose for free-form text only; structured content (json-shaped or code/url)
+  // stays in mono so whitespace and punctuation read correctly.
   const isProse = !isJsonish && clip.content_type === 'text';
   const body = isJsonish ? tryPrettyJson(clip.content) : clip.content;
   const highlightQuery = parseFromToken(searchQuery ?? '').residual;

@@ -56,12 +56,6 @@ export const IconCode = ({ size = 14, style }: IconProps) => (
   </svg>
 );
 
-export const IconBraces = ({ size = 14, style }: IconProps) => (
-  <svg {...base(size)} style={style}>
-    <path d="M8 3H7a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2 2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1M16 3h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2 2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-1" />
-  </svg>
-);
-
 export const IconLink = ({ size = 14, style }: IconProps) => (
   <svg {...base(size)} style={style}>
     <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" />
@@ -73,13 +67,6 @@ export const IconImage = ({ size = 14, style }: IconProps) => (
     <rect x="3" y="3" width="18" height="18" rx="2" />
     <circle cx="9" cy="9" r="2" />
     <path d="m21 15-4-4L5 21" />
-  </svg>
-);
-
-export const IconAlert = ({ size = 14, style }: IconProps) => (
-  <svg {...base(size)} style={style}>
-    <circle cx="12" cy="12" r="9" />
-    <path d="M12 8v5M12 16h.01" />
   </svg>
 );
 
@@ -179,10 +166,8 @@ export const IconMonitor = ({ size = 14, style }: IconProps) => (
 export function typeGlyph(t: string, size = 14): ReactElement {
   switch (t) {
     case "code":  return <IconCode size={size} />;
-    case "json":  return <IconBraces size={size} />;
     case "url":   return <IconLink size={size} />;
     case "image": return <IconImage size={size} />;
-    case "error": return <IconAlert size={size} />;
     default:      return <IconDoc size={size} />;
   }
 }

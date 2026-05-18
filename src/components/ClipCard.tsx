@@ -17,7 +17,7 @@ interface ClipCardProps {
 // ─── Helpers ──────────────────────────────────────────────
 
 function isTextType(ct: string): boolean {
-  return ct === "text" || ct === "json" || ct === "code" || ct === "url" || ct === "error";
+  return ct === "text" || ct === "code" || ct === "url";
 }
 
 function isImageType(clip: LocalClip): boolean {

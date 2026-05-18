@@ -59,3 +59,19 @@ Do NOT, on the desktop repo:
 If you need to run desktop locally against an unpublished cinch-core during
 development, keep the override out of `Cargo.toml`. Use an uncommitted
 `.cargo/config.toml` or a worktree-local `Cargo.toml` patch you never `git add`.
+
+## Content Type Classification
+
+The desktop's clipboard polling pipeline classifies text clips before pushing:
+
+- `clipboard/monitor.rs` calls `client_core::classify::detect(&text)` **before** consuming `text.into_bytes()` (borrow checker — the classifier needs `&str`, the pusher needs `Vec<u8>`).
+- `ContentType` derives `Copy`, so the classified value moves cleanly into the spawned async closure.
+- The classified value flows into both `pusher.push_text(.., content_type)` (wire) and the `clip_received_stub(.., content_type.as_wire())` event payload (frontend).
+
+Wire vocabulary is exactly 4 strings: `text`, `code`, `url`, `image`. The frontend (`ClipCard.tsx`, `ClipDetail.tsx`, `icons.tsx`) dispatches on these. Do not introduce new values like `json` or `error` on the desktop side — `cinch-core/proto/cinch/v1/clips.proto` is the source of truth, and the wire field is open `string` only for backwards compatibility. Adding a new logical type requires a coordinated cinch-core change + crates.io publish.
+
+`store::models::LocalClip` (the legacy type still derived in `models.rs`) is being phased out. New code should use `commands::clips::LocalClip` (Specta-exported). The legacy type is kept alive only because `sync_status.rs` and a few tests still depend on it.
+
+## Files Never to Commit
+
+`.design-research/` and `docs/` (both root-level) hold internal product strategy: personas, journey maps, north-star vision, dashboard specs. They are gitignored. Do not move them out of ignore status; if they need to live in version control, put them in a private repo instead.

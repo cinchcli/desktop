@@ -34,4 +34,8 @@ planning/
 target/
 gen/
 .superpowers/
+
+# Internal product strategy — never commit
+.design-research/
+docs/
 .design-research/docs/
